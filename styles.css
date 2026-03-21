@@ -60,7 +60,7 @@ body {
 
 .split-layout {
   display: grid;
-  grid-template-columns: minmax(420px, 45%) minmax(480px, 55%);
+  grid-template-columns: minmax(0, 45%) minmax(0, 55%);
   gap: 18px;
   height: 100%;
 }
@@ -105,11 +105,15 @@ body {
 }
 
 .session-bar {
-  display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   gap: 12px 14px;
-  align-items: end;
+  align-items: flex-end;
   padding: 14px;
+}
+
+.session-left {
+  flex: 0 0 auto;
 }
 
 .session-left strong {
@@ -120,10 +124,11 @@ body {
 }
 
 .session-right {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(88px, 1fr));
+  flex: 1 1 auto;
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
-  align-items: end;
+  align-items: flex-end;
 }
 
 .session-note {
@@ -134,14 +139,15 @@ body {
 }
 
 .hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+  display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 16px;
-  align-items: stretch;
+  align-items: flex-start;
 }
 
 .hero-copy {
+  flex: 1 1 220px;
   min-width: 0;
 }
 
@@ -156,10 +162,10 @@ body {
 
 h1 {
   margin: 0;
-  font-size: 30px;
+  font-size: clamp(20px, 5vw, 30px);
   font-weight: 800;
   letter-spacing: -0.04em;
-  line-height: 1;
+  line-height: 1.2;
   color: #183247;
 }
 
@@ -180,9 +186,11 @@ h2 {
 }
 
 .hero-stats {
+  flex: 1 1 240px;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+  align-content: start;
 }
 
 .stat-card {
@@ -201,7 +209,7 @@ h2 {
 .stat-card strong {
   display: block;
   margin-top: 5px;
-  font-size: 28px;
+  font-size: clamp(18px, 4vw, 28px);
   font-weight: 800;
   line-height: 1;
   letter-spacing: -0.04em;
@@ -227,11 +235,16 @@ h2 {
   position: sticky;
   top: 0;
   z-index: 100;
-  display: grid;
-  grid-template-columns: 1.55fr 1fr 1.2fr 0.9fr auto auto;
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 12px;
   margin-bottom: 14px;
+}
+
+.controls label {
+  flex: 1 1 140px;
+  min-width: 120px;
 }
 
 .toggle-field {
@@ -261,7 +274,10 @@ label {
   color: var(--muted);
 }
 
-.auth-field {
+.auth-field,
+.lang-field {
+  flex: 1 1 120px;
+  min-width: 100px;
   position: relative;
 }
 
@@ -286,9 +302,9 @@ input.input-error {
 }
 
 .field-error {
-  display: block;
-  min-height: 14px;
-  margin-top: 2px;
+  position: absolute;
+  bottom: -16px;
+  left: 0;
   font-size: 11px;
   font-weight: 600;
   color: #dc3545;
@@ -327,18 +343,24 @@ select:focus {
 
 .btn-primary,
 .btn-secondary {
-  align-self: end;
+  align-self: flex-end;
+  flex-shrink: 0;
   border: none;
   border-radius: var(--radius-sm);
-  padding: 10px 14px;
+  padding: 10px 12px;
   font: inherit;
-  font-size: 13px;
+  font-size: clamp(11px, 2vw, 13px);
   font-weight: 700;
   color: var(--white);
   cursor: pointer;
   background: linear-gradient(140deg, var(--accent) 0%, var(--accent-deep) 100%);
   box-shadow: 0 10px 18px rgba(10, 186, 181, 0.18);
   transition: all 0.2s ease;
+  white-space: nowrap;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .btn-primary:hover,
@@ -534,6 +556,10 @@ select:focus {
   top: 0;
   height: calc(100vh - 36px);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 18px;
+  gap: 0;
   background:
     linear-gradient(145deg, rgba(255, 255, 255, 0.88), rgba(239, 251, 251, 0.78)),
     linear-gradient(0deg, rgba(10, 186, 181, 0.04), rgba(10, 186, 181, 0.04));
@@ -542,6 +568,7 @@ select:focus {
 .map-grid {
   position: absolute;
   inset: 0;
+  z-index: 0;
   background-image:
     linear-gradient(rgba(10, 186, 181, 0.08) 1px, transparent 1px),
     linear-gradient(90deg, rgba(10, 186, 181, 0.08) 1px, transparent 1px),
@@ -552,10 +579,7 @@ select:focus {
 }
 
 .map-overlay {
-  position: absolute;
-  top: 18px;
-  left: 18px;
-  right: 18px;
+  position: relative;
   z-index: 2;
   max-width: 340px;
   padding: 14px 16px;
@@ -572,7 +596,6 @@ select:focus {
   color: var(--muted);
 }
 
-.map-pins span {
 .map-pins {
   position: absolute;
   inset: 0;
@@ -599,11 +622,9 @@ select:focus {
 }
 
 .map-detail {
-  position: absolute;
-  left: 18px;
-  right: 18px;
-  bottom: 18px;
+  position: relative;
   z-index: 2;
+  margin-top: auto;
   padding: 16px;
   background: rgba(255, 255, 255, 0.9);
 }
@@ -697,17 +718,9 @@ select:focus {
   padding: 0;
 }
 
-@media (max-width: 1200px) {
-  .hero {
-    grid-template-columns: 1fr;
-  }
-
+@media (max-width: 1056px) {
   .hero-stats {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .controls {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: 1fr;
   }
 }
 
@@ -736,31 +749,40 @@ select:focus {
   .map-view {
     position: relative;
     top: auto;
-    height: 250px;
+    height: auto;
+    overflow: visible;
+    flex-direction: column;
+    padding: 14px;
     margin-bottom: 14px;
   }
 
+  .map-grid {
+    position: absolute;
+    inset: 0;
+    height: 180px;
+    border-radius: var(--radius-md);
+    flex-shrink: 0;
+  }
+
+  .map-overlay {
+    position: relative;
+    max-width: 100%;
+  }
+
   .map-detail {
-    left: 12px;
-    right: 12px;
-    bottom: 12px;
+    position: relative;
+    margin-top: 12px;
     padding: 12px;
   }
 
   .controls {
     position: sticky;
     top: 0;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .session-bar,
-  .hero {
-    grid-template-columns: 1fr;
   }
 
   .session-right,
   .admin-grid {
-    grid-template-columns: 1fr;
+    flex-wrap: wrap;
   }
 
   .hero-stats {
@@ -769,10 +791,6 @@ select:focus {
 }
 
 @media (max-width: 640px) {
-  .controls {
-    grid-template-columns: 1fr;
-  }
-
   .booking-item {
     flex-direction: column;
     align-items: stretch;
@@ -836,15 +854,8 @@ select:focus {
   }
 
   .hero-stats,
-  .session-right,
-  .admin-grid,
-  .controls {
+  .admin-grid {
     grid-template-columns: 1fr;
-  }
-
-  .map-view {
-    width: 100%;
-    height: 250px;
   }
 
   .spot-grid {
