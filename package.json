@@ -1,0 +1,25 @@
+{
+  "name": "campus-park-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Campus parking app with Node.js backend",
+  "scripts": {
+    "seed": "node seed.js",
+    "start": "node server.js",
+    "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
+    "prisma:seed": "node prisma/seed.js",
+    "test:concurrency": "node test-concurrency.js"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "csv-parser": "^3.2.0",
+    "dotenv": "^16.4.7",
+    "fs-extra": "^11.3.4",
+    "node-cron": "^4.2.1",
+    "prisma": "^5.22.0"
+  }
+}

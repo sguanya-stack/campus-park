@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CampusPark</title>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg-grid"></div>
+    <main class="app-shell">
+      <div class="split-layout">
+        <section class="left-pane">
+          <div class="left-pane-scroll">
+            <section class="session-bar card">
+              <div class="session-left">
+                <p class="eyebrow" data-i18n="accountLabel">Account</p>
+                <strong id="sessionDisplay">Not signed in</strong>
+              </div>
+              <div class="session-right">
+                <label class="auth-field">
+                  <span data-i18n="usernameLabel">Username</span>
+                  <input
+                    id="userNameInput"
+                    type="text"
+                    placeholder="Enter your username"
+                    aria-describedby="userNameError"
+                    data-i18n-placeholder="usernamePlaceholder"
+                  />
+                  <span id="userNameError" class="field-error hidden" aria-live="polite"></span>
+                </label>
+                <label class="auth-field">
+                  <span data-i18n="passwordLabel">Password</span>
+                  <input
+                    id="passwordInput"
+                    type="password"
+                    placeholder="Enter your password"
+                    aria-describedby="passwordError"
+                    data-i18n-placeholder="passwordPlaceholder"
+                  />
+                  <span id="passwordError" class="field-error hidden" aria-live="polite"></span>
+                </label>
+                <label class="lang-field">
+                  <span data-i18n="languageLabel">Language</span>
+                  <select id="lang-switcher" aria-label="Language switcher">
+                    <option value="en">English</option>
+                    <option value="zh">简体中文</option>
+                    <option value="es">Español</option>
+                    <option value="vi">Tiếng Việt</option>
+                    <option value="fr">Français</option>
+                  </select>
+                </label>
+                <button id="loginBtn" class="btn-primary" data-i18n="signInBtn">Sign In</button>
+                <button id="registerBtn" class="btn-secondary" data-i18n="signUpBtn">Student Sign Up</button>
+                <button id="logoutBtn" class="btn-secondary" data-i18n="signOutBtn">Sign Out</button>
+              </div>
+              <p id="authErrorMessage" class="auth-error hidden" aria-live="polite"></p>
+              <p id="authSuccessMessage" class="auth-success hidden" aria-live="polite"></p>
+              <p class="session-note" data-i18n="defaultAdminNote">Default admin account: admin / admin123</p>
+            </section>
+
+            <header class="hero card">
+              <div class="hero-copy">
+                <p class="eyebrow" data-i18n="heroEyebrow">Campus Mobility</p>
+                <h1 data-i18n="appTitle">CampusPark</h1>
+                <p class="sub" data-i18n="heroSubtitle">
+                  Reserve parking faster around Seattle campus landmarks without getting buried in a cluttered interface.
+                </p>
+              </div>
+              <div class="hero-stats">
+                <div class="stat-card">
+                  <p data-i18n="totalSpaces">Total Spaces</p>
+                  <strong id="totalCount">0</strong>
+                </div>
+                <div class="stat-card">
+                  <p data-i18n="availableNow">Available Now</p>
+                  <strong id="availableCount">0</strong>
+                </div>
+                <div class="stat-card stat-card-trending">
+                  <p data-i18n="todayReservations">Today's Reservations</p>
+                  <strong id="todayBookingCount">0</strong>
+                  <span class="stat-trend">
+                    <i data-lucide="trending-up"></i>
+                    <span data-i18n="liveTrend">Live trend</span>
+                  </span>
+                </div>
+              </div>
+            </header>
+
+            <section class="controls card">
+              <label>
+                <span data-i18n="searchLabel">Search</span>
+                <input id="searchInput" type="text" placeholder="Search by landmark or address" data-i18n-placeholder="searchPlaceholder" />
+              </label>
+              <label>
+                <span data-i18n="zoneLabel">Zone</span>
+                <select id="zoneFilter">
+                  <option value="all" data-i18n="allZones">All Zones</option>
+                </select>
+              </label>
+              <label>
+                <span data-i18n="arrivalTimeLabel">Arrival Time</span>
+                <input type="datetime-local" id="arrivalTime" />
+              </label>
+              <label>
+                <span data-i18n="durationLabel">Duration</span>
+                <select id="duration">
+                  <option value="1" data-i18n="duration1">1 Hour</option>
+                  <option value="2" data-i18n="duration2">2 Hours</option>
+                  <option value="3" data-i18n="duration3">3 Hours</option>
+                  <option value="4" data-i18n="duration4">4 Hours</option>
+                </select>
+              </label>
+              <label class="toggle-field">
+                <span data-i18n="evSpacesLabel">EV Spaces</span>
+                <span class="toggle-inline">
+                  <input type="checkbox" id="evOnlyFilter" />
+                  <span data-i18n="showEvOnly">Show EV Only</span>
+                </span>
+              </label>
+              <button id="recommendBtn" class="btn-primary" data-i18n="recommendBtn">Recommend</button>
+              <button id="exportBtn" class="btn-secondary" data-i18n="exportBtn">Export</button>
+            </section>
+
+            <section class="results-section">
+              <div class="section-heading">
+                <h2 data-i18n="parkingSpots">Parking Spots</h2>
+                <p data-i18n="resultsSubtitle">Live inventory, compact cards, faster scanning.</p>
+              </div>
+              <div id="spotGrid" class="spot-grid"></div>
+            </section>
+
+            <section id="adminPanel" class="card admin-panel hidden">
+              <div class="section-heading">
+                <h2 data-i18n="adminPanel">Admin Panel</h2>
+                <p data-i18n="adminSubtitle">Manage lot visibility without leaving the dashboard.</p>
+              </div>
+              <form id="adminSpotForm" class="admin-grid">
+                <label>
+                  <span data-i18n="spaceIdLabel">Space ID</span>
+                  <input id="newSpotId" type="text" placeholder="e.g. E-41" data-i18n-placeholder="spaceIdPlaceholder" required />
+                </label>
+                <label>
+                  <span data-i18n="zoneLabel">Zone</span>
+                  <input id="newSpotZone" type="text" placeholder="e.g. Student Center" data-i18n-placeholder="newZonePlaceholder" required />
+                </label>
+                <label>
+                  <span data-i18n="locationLabel">Location</span>
+                  <input id="newSpotLocation" type="text" placeholder="e.g. Student Center East Entrance" data-i18n-placeholder="locationPlaceholder" required />
+                </label>
+                <button class="btn-primary" type="submit" data-i18n="addSpaceBtn">Add Space</button>
+              </form>
+              <div id="adminSpotList" class="booking-list"></div>
+            </section>
+
+            <section class="reservations-section">
+              <div class="section-heading">
+                <h2 data-i18n="myReservations">My Reservations</h2>
+                <p data-i18n="reservationsSubtitle">Upcoming and active bookings.</p>
+              </div>
+              <div id="bookingList" class="booking-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <aside class="right-pane">
+          <div id="map-view" class="map-view card" aria-label="Map view placeholder">
+            <div class="map-overlay">
+              <p class="eyebrow" data-i18n="mapViewLabel">Map View</p>
+              <h2 data-i18n="mapCanvasTitle">Seattle Parking Canvas</h2>
+              <p data-i18n="mapCanvasSubtitle">
+                Reserved for Mapbox integration. Keep the map fixed while the inventory list scrolls independently.
+              </p>
+            </div>
+            <div class="map-grid"></div>
+            <div id="mapPins" class="map-pins" aria-hidden="true"></div>
+            <div class="map-detail card">
+              <p class="eyebrow" data-i18n="selectedLocationLabel">Selected Location</p>
+              <h3 id="mapDetailTitle" data-i18n="selectParkingLot">Select a parking lot</h3>
+              <p id="mapDetailMeta" class="map-detail-meta">
+                Choose a card on the left to preview the lot and inventory here.
+              </p>
+              <div class="map-detail-tags">
+                <span id="mapDetailZone" class="map-detail-tag" data-i18n="zoneLabel">Zone</span>
+                <span id="mapDetailAvailability" class="map-detail-tag" data-i18n="availabilityLabel">Availability</span>
+                <span id="mapDetailPrice" class="map-detail-tag" data-i18n="priceLabel">Price</span>
+              </div>
+              <button id="mapReserveBtn" class="btn-primary" type="button" disabled data-i18n="reserveSelectedBtn">
+                Reserve Selected Spot
+              </button>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </main>
+
+    <dialog id="bookingDialog" class="dialog">
+      <form method="dialog" id="bookingForm">
+        <div class="dialog-sheet-handle" aria-hidden="true"></div>
+        <h3 data-i18n="confirmReservation">Confirm Reservation</h3>
+        <p id="dialogSpotInfo"></p>
+        <label>
+          <span data-i18n="licensePlate">License Plate</span>
+          <input type="text" id="plateInput" placeholder="e.g. 8ABC123" data-i18n-placeholder="platePlaceholder" required />
+        </label>
+        <label>
+          <span data-i18n="phoneNumber">Phone Number</span>
+          <input type="tel" id="phoneInput" placeholder="e.g. 5551234567" data-i18n-placeholder="phonePlaceholder" required />
+        </label>
+        <menu>
+          <button value="cancel" class="btn-secondary" data-i18n="cancelBtn">Cancel</button>
+          <button id="confirmBookingBtn" value="default" class="btn-primary" data-i18n="confirmReservation">
+            Confirm Reservation
+          </button>
+        </menu>
+      </form>
+    </dialog>
+
+    <template id="spotCardTemplate">
+      <article class="spot-card parking-spot-card card">
+        <div class="spot-top">
+          <div class="spot-heading">
+            <strong class="spot-id"></strong>
+            <span class="spot-ev hidden"></span>
+          </div>
+          <span class="spot-zone"></span>
+        </div>
+        <p class="spot-location"></p>
+        <p class="spot-status"></p>
+        <button class="book-btn btn-primary" data-i18n="reserveBtn">Reserve</button>
+      </article>
+    </template>
+
+    <template id="bookingTemplate">
+      <article class="booking-item card">
+        <div>
+          <strong class="booking-spot"></strong>
+          <p class="booking-time"></p>
+          <p class="booking-plate"></p>
+          <p class="booking-owner"></p>
+        </div>
+        <button class="cancel-btn btn-secondary" data-i18n="cancelReservationBtn">Cancel Reservation</button>
+      </article>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>

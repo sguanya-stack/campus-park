@@ -1,0 +1,90 @@
+{
+  "spots": [
+    {
+      "id": "slu-neu-001",
+      "name": "NEU Seattle Campus Garage",
+      "address": "225 Terry Ave N",
+      "zone": "Terry Ave",
+      "totalSpots": 80,
+      "availableSpots": 12,
+      "isEV": true,
+      "available": true
+    },
+    {
+      "id": "slu-amazon-002",
+      "name": "The Spheres Underground Parking",
+      "address": "2111 7th Ave",
+      "zone": "7th Ave",
+      "totalSpots": 250,
+      "availableSpots": 45,
+      "isEV": true,
+      "pricePerHour": 9,
+      "status": "active",
+      "available": true
+    },
+    {
+      "id": "slu-park-003",
+      "name": "South Lake Union Park Lot",
+      "address": "860 Terry Ave N",
+      "zone": "Valley St",
+      "totalSpots": 40,
+      "availableSpots": 0,
+      "isEV": false,
+      "pricePerHour": 4,
+      "status": "active",
+      "available": false
+    },
+    {
+      "id": "slu-wholefoods-004",
+      "name": "Whole Foods Market SLU",
+      "address": "2200 Westlake Ave",
+      "zone": "Westlake Ave",
+      "totalSpots": 150,
+      "availableSpots": 88,
+      "isEV": true,
+      "pricePerHour": 7,
+      "status": "active",
+      "available": true
+    },
+    {
+      "id": "slu-mox-005",
+      "name": "Mox Boarding House Hub",
+      "address": "5105 Leary Ave NW",
+      "zone": "Dexter Ave",
+      "totalSpots": 25,
+      "availableSpots": 5,
+      "isEV": false,
+      "pricePerHour": 3,
+      "status": "inactive",
+      "available": true
+    }
+  ],
+  "bookings": [],
+  "sessions": [
+    {
+      "token": "614369ec-2a7a-48ab-9031-91068cf7cbda",
+      "userId": "fcc3f1ed-86cd-4000-b1f7-2756641a460b",
+      "name": "chloe",
+      "role": "student",
+      "createdAt": "2026-03-19T23:31:14.101Z"
+    }
+  ],
+  "users": [
+    {
+      "id": "user-admin",
+      "name": "admin",
+      "role": "admin",
+      "passwordSalt": "campuspark-admin-salt",
+      "passwordHash": "fe66cc3192a3aa6be57d6b5e34dd357e9ebfe5e7f769e020780c8f9ee384f495d4554c821d778c3c543ac3b5ebe5db7391010c6a9f98fb877693c1f14a22edee",
+      "createdAt": "2026-03-19T00:00:00.000Z"
+    },
+    {
+      "id": "fcc3f1ed-86cd-4000-b1f7-2756641a460b",
+      "name": "chloe",
+      "role": "student",
+      "passwordSalt": "fa7ceda71b53ddb53162be616bf832d0",
+      "passwordHash": "323cef7d10d0c8430c72c40a4bcf4a1d88db5d9cce20e72ddc0839cf6c4a108b2ca6dfa66a8874a227c2bf4a580ae77340a16083dcfe7fa4b626f37968bfb6b1",
+      "createdAt": "2026-03-19T22:38:20.798Z"
+    }
+  ]
+}

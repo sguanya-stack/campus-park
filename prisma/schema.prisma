@@ -1,0 +1,87 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  EXPIRED
+}
+
+model AppUser {
+  id           String       @id @default(cuid())
+  name         String       @unique
+  role         String       @default("student")
+  passwordSalt String
+  passwordHash String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  sessions     AppSession[]
+
+  @@index([role])
+}
+
+model AppSession {
+  token     String   @id
+  userId    String
+  createdAt DateTime @default(now())
+  expiresAt DateTime?
+
+  user      AppUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model ParkingSpot {
+  id                  String        @id @default(cuid())
+  externalLocationId  String?       @unique
+  slug                String?       @unique
+  name                String
+  address             String?
+  zone                String?
+  totalSpots          Int           @default(0)
+  availableSpots      Int           @default(0)
+  pricePerHour        Decimal?      @db.Decimal(10, 2)
+  priceText           String?
+  isEV                Boolean       @default(false)
+  status              String        @default("active")
+  requiresPrintPass   Boolean       @default(false)
+  requiresDisplayPass Boolean       @default(false)
+  cancellationNotice  Int           @default(0)
+  fetchedAt           DateTime?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  reservations        Reservation[]
+
+  @@index([zone])
+  @@index([status])
+  @@index([availableSpots])
+}
+
+model Reservation {
+  id          String            @id @default(cuid())
+  userId      String            // 配合 Supabase Auth 的 UUID
+  spotId      String
+  startTime   DateTime
+  endTime     DateTime
+  plateNumber String?
+  phoneNumber String?
+  status      ReservationStatus @default(PENDING)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  spot        ParkingSpot       @relation(fields: [spotId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([spotId])
+  @@index([status])
+  @@index([startTime, endTime])
+}
