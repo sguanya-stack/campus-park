@@ -6,160 +6,130 @@
     <title>CampusPark</title>
     <script src="https://unpkg.com/lucide@latest"></script>
     <link rel="stylesheet" href="styles.css" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0abab5" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
   </head>
   <body>
     <div class="bg-grid"></div>
     <main class="app-shell">
-      <div class="split-layout">
-        <section class="left-pane">
-          <div class="left-pane-scroll">
-            <section class="session-bar card">
-              <div class="session-left">
-                <p class="eyebrow" data-i18n="accountLabel">Account</p>
-                <strong id="sessionDisplay">Not signed in</strong>
-              </div>
-              <div class="session-right">
-                <label class="auth-field">
-                  <span data-i18n="usernameLabel">Username</span>
-                  <input
-                    id="userNameInput"
-                    type="text"
-                    placeholder="Enter your username"
-                    aria-describedby="userNameError"
-                    data-i18n-placeholder="usernamePlaceholder"
-                  />
-                  <span id="userNameError" class="field-error hidden" aria-live="polite"></span>
-                </label>
-                <label class="auth-field">
-                  <span data-i18n="passwordLabel">Password</span>
-                  <input
-                    id="passwordInput"
-                    type="password"
-                    placeholder="Enter your password"
-                    aria-describedby="passwordError"
-                    data-i18n-placeholder="passwordPlaceholder"
-                  />
-                  <span id="passwordError" class="field-error hidden" aria-live="polite"></span>
-                </label>
-                <label class="lang-field">
-                  <span data-i18n="languageLabel">Language</span>
-                  <select id="lang-switcher" aria-label="Language switcher">
-                    <option value="en">English</option>
-                    <option value="zh">简体中文</option>
-                    <option value="es">Español</option>
-                    <option value="vi">Tiếng Việt</option>
-                    <option value="fr">Français</option>
-                  </select>
-                </label>
-                <button id="loginBtn" class="btn-primary" data-i18n="signInBtn">Sign In</button>
-                <button id="registerBtn" class="btn-secondary" data-i18n="signUpBtn">Student Sign Up</button>
-                <button id="logoutBtn" class="btn-secondary" data-i18n="signOutBtn">Sign Out</button>
-              </div>
-              <p id="authErrorMessage" class="auth-error hidden" aria-live="polite"></p>
-              <p id="authSuccessMessage" class="auth-success hidden" aria-live="polite"></p>
-              <p class="session-note" data-i18n="defaultAdminNote">Default admin account: admin / admin123</p>
-            </section>
+      <section class="topbar card">
+        <div class="brand-lockup">
+          <p class="eyebrow" data-i18n="heroEyebrow">Campus Mobility</p>
+          <div class="brand-title-row">
+            <h1 data-i18n="appTitle">CampusPark</h1>
+            <span class="brand-badge" data-i18n="resultsSubtitle">Live inventory, compact cards, faster scanning.</span>
+          </div>
+        </div>
+        <div class="session-cluster">
+          <nav class="top-nav" aria-label="Primary">
+            <a href="/" class="nav-link" data-route-link="/" data-i18n="discoverLabel">Discover</a>
+            <a href="/reservations" class="nav-link" data-route-link="/reservations" data-i18n="myReservations">My Reservations</a>
+          </nav>
+          <div class="session-meta">
+            <p class="eyebrow" data-i18n="accountLabel">Account</p>
+            <strong id="sessionDisplay">Not signed in</strong>
+          </div>
+          <div class="session-controls">
+            <label class="auth-field compact-field">
+              <span data-i18n="usernameLabel">Username</span>
+              <input
+                id="userNameInput"
+                type="text"
+                placeholder="Enter your username"
+                aria-describedby="userNameError"
+                data-i18n-placeholder="usernamePlaceholder"
+              />
+              <span id="userNameError" class="field-error hidden" aria-live="polite"></span>
+            </label>
+            <label class="auth-field compact-field">
+              <span data-i18n="passwordLabel">Password</span>
+              <input
+                id="passwordInput"
+                type="password"
+                placeholder="Enter your password"
+                aria-describedby="passwordError"
+                data-i18n-placeholder="passwordPlaceholder"
+              />
+              <span id="passwordError" class="field-error hidden" aria-live="polite"></span>
+            </label>
+            <label class="lang-field compact-field">
+              <span data-i18n="languageLabel">Language</span>
+              <select id="lang-switcher" aria-label="Language switcher">
+                <option value="en">English</option>
+                <option value="zh">简体中文</option>
+                <option value="es">Español</option>
+                <option value="vi">Tiếng Việt</option>
+                <option value="fr">Français</option>
+              </select>
+            </label>
+            <button id="loginBtn" class="btn-primary" data-i18n="signInBtn">Sign In</button>
+            <button id="registerBtn" class="btn-secondary" data-i18n="signUpBtn">Student Sign Up</button>
+            <button id="logoutBtn" class="btn-secondary" data-i18n="signOutBtn">Sign Out</button>
+          </div>
+        </div>
+        <p id="authErrorMessage" class="auth-error hidden" aria-live="polite"></p>
+        <p id="authSuccessMessage" class="auth-success hidden" aria-live="polite"></p>
+      </section>
 
-            <header class="hero card">
-              <div class="hero-copy">
-                <p class="eyebrow" data-i18n="heroEyebrow">Campus Mobility</p>
-                <h1 data-i18n="appTitle">CampusPark</h1>
+      <div id="dashboardView" class="split-layout route-view">
+        <div class="mobile-view-switch card">
+          <button id="showListBtn" class="view-switch-btn" type="button" data-i18n="parkingSpots">Parking Spots</button>
+          <button id="showMapBtn" class="view-switch-btn" type="button" data-i18n="mapViewLabel">Map View</button>
+        </div>
+        <section class="left-pane card">
+          <div class="list-shell">
+            <section class="search-panel">
+              <div class="search-copy">
+                <p class="eyebrow" data-i18n="searchLabel">Search</p>
+                <h2 data-i18n="parkingSpots">Parking Spots</h2>
                 <p class="sub" data-i18n="heroSubtitle">
                   Reserve parking faster around Seattle campus landmarks without getting buried in a cluttered interface.
                 </p>
               </div>
-              <div class="hero-stats">
-                <div class="stat-card">
-                  <p data-i18n="totalSpaces">Total Spaces</p>
-                  <strong id="totalCount">0</strong>
-                </div>
-                <div class="stat-card">
-                  <p data-i18n="availableNow">Available Now</p>
-                  <strong id="availableCount">0</strong>
-                </div>
-                <div class="stat-card stat-card-trending">
-                  <p data-i18n="todayReservations">Today's Reservations</p>
-                  <strong id="todayBookingCount">0</strong>
-                  <span class="stat-trend">
-                    <i data-lucide="trending-up"></i>
-                    <span data-i18n="liveTrend">Live trend</span>
+              <div class="controls search-controls">
+                <label class="search-field search-field-wide">
+                  <span data-i18n="searchLabel">Search</span>
+                  <input id="searchInput" type="text" placeholder="Search by landmark or address" data-i18n-placeholder="searchPlaceholder" />
+                </label>
+                <label class="search-field">
+                  <span data-i18n="zoneLabel">Zone</span>
+                  <select id="zoneFilter">
+                    <option value="all" data-i18n="allZones">All Zones</option>
+                  </select>
+                </label>
+                <label class="search-field">
+                  <span data-i18n="arrivalTimeLabel">Arrival Time</span>
+                  <input type="datetime-local" id="arrivalTime" />
+                </label>
+                <label class="search-field">
+                  <span data-i18n="durationLabel">Duration</span>
+                  <select id="duration">
+                    <option value="1" data-i18n="duration1">1 Hour</option>
+                    <option value="2" data-i18n="duration2">2 Hours</option>
+                    <option value="3" data-i18n="duration3">3 Hours</option>
+                    <option value="4" data-i18n="duration4">4 Hours</option>
+                  </select>
+                </label>
+                <label class="search-field toggle-field">
+                  <span data-i18n="evSpacesLabel">EV Spaces</span>
+                  <span class="toggle-inline">
+                    <input type="checkbox" id="evOnlyFilter" />
+                    <span data-i18n="showEvOnly">Show EV Only</span>
                   </span>
-                </div>
+                </label>
+                <button id="recommendBtn" class="btn-primary" data-i18n="recommendBtn">Recommend</button>
               </div>
-            </header>
-
-            <section class="controls card">
-              <label>
-                <span data-i18n="searchLabel">Search</span>
-                <input id="searchInput" type="text" placeholder="Search by landmark or address" data-i18n-placeholder="searchPlaceholder" />
-              </label>
-              <label>
-                <span data-i18n="zoneLabel">Zone</span>
-                <select id="zoneFilter">
-                  <option value="all" data-i18n="allZones">All Zones</option>
-                </select>
-              </label>
-              <label>
-                <span data-i18n="arrivalTimeLabel">Arrival Time</span>
-                <input type="datetime-local" id="arrivalTime" />
-              </label>
-              <label>
-                <span data-i18n="durationLabel">Duration</span>
-                <select id="duration">
-                  <option value="1" data-i18n="duration1">1 Hour</option>
-                  <option value="2" data-i18n="duration2">2 Hours</option>
-                  <option value="3" data-i18n="duration3">3 Hours</option>
-                  <option value="4" data-i18n="duration4">4 Hours</option>
-                </select>
-              </label>
-              <label class="toggle-field">
-                <span data-i18n="evSpacesLabel">EV Spaces</span>
-                <span class="toggle-inline">
-                  <input type="checkbox" id="evOnlyFilter" />
-                  <span data-i18n="showEvOnly">Show EV Only</span>
-                </span>
-              </label>
-              <button id="recommendBtn" class="btn-primary" data-i18n="recommendBtn">Recommend</button>
-              <button id="exportBtn" class="btn-secondary" data-i18n="exportBtn">Export</button>
             </section>
 
-            <section class="results-section">
+            <section class="results-section list-results">
               <div class="section-heading">
-                <h2 data-i18n="parkingSpots">Parking Spots</h2>
-                <p data-i18n="resultsSubtitle">Live inventory, compact cards, faster scanning.</p>
+                <div>
+                  <h2 data-i18n="parkingSpots">Parking Spots</h2>
+                  <p data-i18n="resultsSubtitle">Live inventory, compact cards, faster scanning.</p>
+                </div>
               </div>
               <div id="spotGrid" class="spot-grid"></div>
-            </section>
-
-            <section id="adminPanel" class="card admin-panel hidden">
-              <div class="section-heading">
-                <h2 data-i18n="adminPanel">Admin Panel</h2>
-                <p data-i18n="adminSubtitle">Manage lot visibility without leaving the dashboard.</p>
-              </div>
-              <form id="adminSpotForm" class="admin-grid">
-                <label>
-                  <span data-i18n="spaceIdLabel">Space ID</span>
-                  <input id="newSpotId" type="text" placeholder="e.g. E-41" data-i18n-placeholder="spaceIdPlaceholder" required />
-                </label>
-                <label>
-                  <span data-i18n="zoneLabel">Zone</span>
-                  <input id="newSpotZone" type="text" placeholder="e.g. Student Center" data-i18n-placeholder="newZonePlaceholder" required />
-                </label>
-                <label>
-                  <span data-i18n="locationLabel">Location</span>
-                  <input id="newSpotLocation" type="text" placeholder="e.g. Student Center East Entrance" data-i18n-placeholder="locationPlaceholder" required />
-                </label>
-                <button class="btn-primary" type="submit" data-i18n="addSpaceBtn">Add Space</button>
-              </form>
-              <div id="adminSpotList" class="booking-list"></div>
-            </section>
-
-            <section class="reservations-section">
-              <div class="section-heading">
-                <h2 data-i18n="myReservations">My Reservations</h2>
-                <p data-i18n="reservationsSubtitle">Upcoming and active bookings.</p>
-              </div>
-              <div id="bookingList" class="booking-list"></div>
             </section>
           </div>
         </section>
@@ -175,6 +145,10 @@
             </div>
             <div class="map-grid"></div>
             <div id="mapPins" class="map-pins" aria-hidden="true"></div>
+            <div id="mapFocusChip" class="map-focus-chip hidden" aria-live="polite">
+              <strong id="mapFocusTitle"></strong>
+              <span id="mapFocusMeta"></span>
+            </div>
             <div class="map-detail card">
               <p class="eyebrow" data-i18n="selectedLocationLabel">Selected Location</p>
               <h3 id="mapDetailTitle" data-i18n="selectParkingLot">Select a parking lot</h3>
@@ -186,14 +160,61 @@
                 <span id="mapDetailAvailability" class="map-detail-tag" data-i18n="availabilityLabel">Availability</span>
                 <span id="mapDetailPrice" class="map-detail-tag" data-i18n="priceLabel">Price</span>
               </div>
-              <button id="mapReserveBtn" class="btn-primary" type="button" disabled data-i18n="reserveSelectedBtn">
-                Reserve Selected Spot
-              </button>
+              <div class="map-detail-actions">
+                <button id="mapNavigateBtn" class="btn-secondary" type="button">
+                  Navigate
+                </button>
+                <button id="mapReserveBtn" class="btn-primary" type="button" disabled data-i18n="reserveSelectedBtn">
+                  Reserve Selected Spot
+                </button>
+              </div>
             </div>
           </div>
         </aside>
       </div>
+
+      <section id="reservationsView" class="reservations-page route-view hidden">
+        <div class="reservations-layout">
+          <section class="reservations-hero card">
+            <p class="eyebrow" data-i18n="myReservations">My Reservations</p>
+            <h2 data-i18n="myReservations">My Reservations</h2>
+            <p class="sub" data-i18n="reservationsSubtitle">Upcoming and active bookings.</p>
+          </section>
+          <section class="reservations-content card">
+            <div class="section-heading">
+              <div>
+                <h2 data-i18n="myReservations">My Reservations</h2>
+                <p data-i18n="reservationsSubtitle">Upcoming and active bookings.</p>
+              </div>
+            </div>
+            <div id="bookingList" class="booking-list reservations-list"></div>
+          </section>
+        </div>
+      </section>
     </main>
+
+    <div id="installPrompt" class="install-prompt card hidden" aria-live="polite">
+      <div class="install-prompt-copy">
+        <p class="eyebrow">Install App</p>
+        <strong>Save CampusPark to your home screen</strong>
+        <p>Launch faster, get an app-like full screen, and keep Seattle parking one tap away.</p>
+      </div>
+      <div class="install-prompt-actions">
+        <button id="installAppBtn" class="btn-primary" type="button">Install</button>
+        <button id="dismissInstallPromptBtn" class="btn-secondary" type="button">Not Now</button>
+      </div>
+    </div>
+
+    <div id="iosInstallHint" class="install-prompt card hidden" aria-live="polite">
+      <div class="install-prompt-copy">
+        <p class="eyebrow">Install On iPhone</p>
+        <strong>Add CampusPark to your home screen</strong>
+        <p>In Safari, tap Share, then choose Add to Home Screen.</p>
+      </div>
+      <div class="install-prompt-actions">
+        <button id="dismissIosHintBtn" class="btn-secondary" type="button">Got It</button>
+      </div>
+    </div>
 
     <dialog id="bookingDialog" class="dialog">
       <form method="dialog" id="bookingForm">
@@ -236,14 +257,55 @@
       <article class="booking-item card">
         <div>
           <strong class="booking-spot"></strong>
+          <p class="booking-status"></p>
           <p class="booking-time"></p>
           <p class="booking-plate"></p>
+          <p class="booking-ticket hidden"></p>
+          <p class="booking-settlement hidden"></p>
           <p class="booking-owner"></p>
         </div>
-        <button class="cancel-btn btn-secondary" data-i18n="cancelReservationBtn">Cancel Reservation</button>
+        <div class="booking-actions">
+          <button class="checkin-btn btn-primary hidden" type="button">Check-In / Scan Ticket</button>
+          <button class="checkout-btn btn-primary hidden" type="button">Check Out / Settle</button>
+          <button class="cancel-btn btn-secondary" type="button" data-i18n="cancelReservationBtn">Cancel Reservation</button>
+        </div>
       </article>
     </template>
 
+    <dialog id="checkInDialog" class="dialog">
+      <form method="dialog" id="checkInForm">
+        <div class="dialog-sheet-handle" aria-hidden="true"></div>
+        <h3>Check-In / Scan Ticket</h3>
+        <p id="checkInReservationInfo">Enter the 6-digit paper ticket code from the garage gate.</p>
+        <label>
+          <span>Ticket Code</span>
+          <input
+            type="text"
+            id="ticketCodeInput"
+            inputmode="numeric"
+            pattern="[0-9]{6}"
+            maxlength="6"
+            placeholder="123456"
+            required
+          />
+        </label>
+        <menu>
+          <button value="cancel" class="btn-secondary" type="button" id="cancelCheckInBtn">Cancel</button>
+          <button id="confirmCheckInBtn" value="default" class="btn-primary" type="submit">Confirm Check-In</button>
+        </menu>
+      </form>
+    </dialog>
+
     <script src="app.js"></script>
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker
+            .register("/service-worker.js")
+            .then((reg) => console.log("Service Worker registered!", reg.scope))
+            .catch((err) => console.error("Service Worker registration failed:", err));
+        });
+      }
+    </script>
   </body>
 </html>

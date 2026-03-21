@@ -8,8 +8,11 @@ let spots = [];
 let myBookings = [];
 let selectedSpotId = null;
 let selectedMapSpotId = null;
-let statsAnimatedOnce = false;
+let selectedCheckInBookingId = null;
 let searchDebounceTimer = null;
+let currentRoute = "/";
+let mobilePanel = "map";
+let deferredInstallPrompt = null;
 
 const zoneFilter = document.getElementById("zoneFilter");
 const langSwitcher = document.getElementById("lang-switcher");
@@ -18,7 +21,6 @@ const arrivalTime = document.getElementById("arrivalTime");
 const duration = document.getElementById("duration");
 const evOnlyFilter = document.getElementById("evOnlyFilter");
 const recommendBtn = document.getElementById("recommendBtn");
-const exportBtn = document.getElementById("exportBtn");
 const spotGrid = document.getElementById("spotGrid");
 const bookingList = document.getElementById("bookingList");
 const mapPins = document.getElementById("mapPins");
@@ -27,15 +29,20 @@ const mapDetailMeta = document.getElementById("mapDetailMeta");
 const mapDetailZone = document.getElementById("mapDetailZone");
 const mapDetailAvailability = document.getElementById("mapDetailAvailability");
 const mapDetailPrice = document.getElementById("mapDetailPrice");
+const mapNavigateBtn = document.getElementById("mapNavigateBtn");
 const mapReserveBtn = document.getElementById("mapReserveBtn");
-const totalCount = document.getElementById("totalCount");
-const availableCount = document.getElementById("availableCount");
-const todayBookingCount = document.getElementById("todayBookingCount");
+const mapFocusChip = document.getElementById("mapFocusChip");
+const mapFocusTitle = document.getElementById("mapFocusTitle");
+const mapFocusMeta = document.getElementById("mapFocusMeta");
 const dialog = document.getElementById("bookingDialog");
+const checkInDialog = document.getElementById("checkInDialog");
 const bookingForm = document.getElementById("bookingForm");
+const checkInForm = document.getElementById("checkInForm");
 const dialogSpotInfo = document.getElementById("dialogSpotInfo");
+const checkInReservationInfo = document.getElementById("checkInReservationInfo");
 const plateInput = document.getElementById("plateInput");
 const phoneInput = document.getElementById("phoneInput");
+const ticketCodeInput = document.getElementById("ticketCodeInput");
 const spotCardTemplate = document.getElementById("spotCardTemplate");
 const bookingTemplate = document.getElementById("bookingTemplate");
 const sessionDisplay = document.getElementById("sessionDisplay");
@@ -48,12 +55,17 @@ const authSuccessMessage = document.getElementById("authSuccessMessage");
 const loginBtn = document.getElementById("loginBtn");
 const registerBtn = document.getElementById("registerBtn");
 const logoutBtn = document.getElementById("logoutBtn");
-const adminPanel = document.getElementById("adminPanel");
-const adminSpotForm = document.getElementById("adminSpotForm");
-const adminSpotList = document.getElementById("adminSpotList");
-const newSpotId = document.getElementById("newSpotId");
-const newSpotZone = document.getElementById("newSpotZone");
-const newSpotLocation = document.getElementById("newSpotLocation");
+const dashboardView = document.getElementById("dashboardView");
+const reservationsView = document.getElementById("reservationsView");
+const routeLinks = [...document.querySelectorAll("[data-route-link]")];
+const showListBtn = document.getElementById("showListBtn");
+const showMapBtn = document.getElementById("showMapBtn");
+const cancelCheckInBtn = document.getElementById("cancelCheckInBtn");
+const installPrompt = document.getElementById("installPrompt");
+const installAppBtn = document.getElementById("installAppBtn");
+const dismissInstallPromptBtn = document.getElementById("dismissInstallPromptBtn");
+const iosInstallHint = document.getElementById("iosInstallHint");
+const dismissIosHintBtn = document.getElementById("dismissIosHintBtn");
 
 const i18n = {
   en: {
@@ -74,6 +86,7 @@ const i18n = {
     availableNow: "Available Now",
     todayReservations: "Today's Reservations",
     liveTrend: "Live trend",
+    discoverLabel: "Discover",
     searchLabel: "Search",
     searchPlaceholder: "Search by landmark or address",
     zoneLabel: "Zone",
@@ -163,6 +176,7 @@ const i18n = {
     availableNow: "当前可用",
     todayReservations: "今日预约",
     liveTrend: "实时趋势",
+    discoverLabel: "发现车位",
     searchLabel: "搜索",
     searchPlaceholder: "按地标或地址搜索",
     zoneLabel: "区域",
@@ -252,6 +266,7 @@ const i18n = {
     availableNow: "Disponible ahora",
     todayReservations: "Reservas de hoy",
     liveTrend: "Tendencia en vivo",
+    discoverLabel: "Descubrir",
     searchLabel: "Buscar",
     searchPlaceholder: "Buscar por punto de referencia o dirección",
     zoneLabel: "Zona",
@@ -341,6 +356,7 @@ const i18n = {
     availableNow: "Còn chỗ hiện tại",
     todayReservations: "Đặt chỗ hôm nay",
     liveTrend: "Xu hướng trực tiếp",
+    discoverLabel: "Khám phá",
     searchLabel: "Tìm kiếm",
     searchPlaceholder: "Tìm theo địa danh hoặc địa chỉ",
     zoneLabel: "Khu vực",
@@ -430,6 +446,7 @@ const i18n = {
     availableNow: "Disponible maintenant",
     todayReservations: "Réservations du jour",
     liveTrend: "Tendance en direct",
+    discoverLabel: "Découvrir",
     searchLabel: "Recherche",
     searchPlaceholder: "Rechercher par repère ou adresse",
     zoneLabel: "Zone",
@@ -508,6 +525,9 @@ init();
 async function init() {
   setupDefaultArrival();
   bindEvents();
+  syncViewportState();
+  syncRoute({ replace: true });
+  setupInstallExperience();
   initI18n();
   await restoreSession();
   await refreshAll();
@@ -519,6 +539,7 @@ function bindEvents() {
   zoneFilter.addEventListener("change", async () => {
     await refreshSpots();
     renderSpots();
+    renderMapView();
   });
   searchInput.addEventListener("input", () => {
     if (searchDebounceTimer) {
@@ -542,18 +563,55 @@ function bindEvents() {
   passwordInput.addEventListener("input", clearAuthError);
   arrivalTime.addEventListener("change", async () => {
     await refreshSpots();
-    await refreshStats();
     renderSpots();
+    renderMapView();
   });
-  evOnlyFilter.addEventListener("change", renderSpots);
+  evOnlyFilter.addEventListener("change", () => {
+    renderSpots();
+    renderMapView();
+  });
   recommendBtn.addEventListener("click", recommendSpot);
-  exportBtn.addEventListener("click", exportMyBookings);
+  mapNavigateBtn.addEventListener("click", handleMapNavigate);
   mapReserveBtn.addEventListener("click", handleMapReserve);
   bookingForm.addEventListener("submit", handleConfirmBooking);
+  checkInForm.addEventListener("submit", handleConfirmCheckIn);
+  cancelCheckInBtn.addEventListener("click", () => {
+    selectedCheckInBookingId = null;
+    checkInDialog.close();
+  });
+  checkInDialog.addEventListener("close", () => {
+    if (!checkInDialog.open) {
+      selectedCheckInBookingId = null;
+    }
+  });
+  ticketCodeInput.addEventListener("input", () => {
+    ticketCodeInput.value = ticketCodeInput.value.replace(/\D/g, "").slice(0, 6);
+  });
   loginBtn.addEventListener("click", handleLogin);
   registerBtn.addEventListener("click", handleRegister);
   logoutBtn.addEventListener("click", handleLogout);
-  adminSpotForm.addEventListener("submit", handleCreateSpot);
+  installAppBtn.addEventListener("click", handleInstallApp);
+  dismissInstallPromptBtn.addEventListener("click", dismissInstallUi);
+  dismissIosHintBtn.addEventListener("click", dismissInstallUi);
+  showListBtn.addEventListener("click", () => {
+    mobilePanel = "list";
+    syncViewportState();
+  });
+  showMapBtn.addEventListener("click", () => {
+    mobilePanel = "map";
+    syncViewportState();
+  });
+  routeLinks.forEach((link) => {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      navigateTo(link.dataset.routeLink || "/");
+    });
+  });
+  window.addEventListener("popstate", () => {
+    syncRoute({ replace: true });
+    render();
+  });
+  window.addEventListener("resize", syncViewportState);
 }
 
 function setupDefaultArrival() {
@@ -575,7 +633,6 @@ async function restoreSession() {
 
 async function refreshAll() {
   await refreshSpots();
-  await refreshStats();
   if (currentUser) {
     await refreshMyBookings();
   } else {
@@ -595,17 +652,6 @@ async function refreshSpots() {
   }
   const result = await apiFetch(`/api/spots?${query.toString()}`, { auth: false });
   spots = result.spots || [];
-}
-
-async function refreshStats() {
-  const at = new Date(arrivalTime.value || Date.now()).toISOString();
-  const query = new URLSearchParams({ at });
-  const result = await apiFetch(`/api/stats?${query.toString()}`, { auth: false });
-  setAnimatedStat(totalCount, Number(result.total || 0));
-  setAnimatedStat(availableCount, Number(result.available || 0));
-  setAnimatedStat(todayBookingCount, Number(result.todayBookings || 0));
-  statsAnimatedOnce = true;
-  refreshLucideIcons();
 }
 
 async function refreshMyBookings() {
@@ -629,19 +675,104 @@ function fillZoneOptions() {
 function syncSessionUi() {
   if (!currentUser) {
     sessionDisplay.textContent = t("notSignedIn");
-    adminPanel.classList.add("hidden");
     return;
   }
   const roleLabel = currentUser.role === "admin" ? t("adminRole") : t("studentRole");
   sessionDisplay.textContent = `${currentUser.name} (${roleLabel})`;
-  adminPanel.classList.toggle("hidden", currentUser.role !== "admin");
+}
+
+function normalizeRoute(pathname) {
+  if (pathname === "/reservations") return "/reservations";
+  return "/";
+}
+
+function setupInstallExperience() {
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    if (!isStandaloneMode()) {
+      installPrompt.classList.remove("hidden");
+    }
+  });
+
+  if (shouldShowIosInstallHint()) {
+    iosInstallHint.classList.remove("hidden");
+  }
+}
+
+function isStandaloneMode() {
+  return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+}
+
+function shouldShowIosInstallHint() {
+  const isIos = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+  const isSafari = /safari/i.test(window.navigator.userAgent) && !/crios|fxios|edgios/i.test(window.navigator.userAgent);
+  return isIos && isSafari && !isStandaloneMode();
+}
+
+async function handleInstallApp() {
+  if (!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  await deferredInstallPrompt.userChoice.catch(() => null);
+  deferredInstallPrompt = null;
+  installPrompt.classList.add("hidden");
+}
+
+function dismissInstallUi() {
+  installPrompt.classList.add("hidden");
+  iosInstallHint.classList.add("hidden");
+}
+
+function isMobileViewport() {
+  return window.innerWidth < 768;
+}
+
+function syncViewportState() {
+  const isMobile = isMobileViewport();
+  if (!isMobile) {
+    dashboardView.classList.remove("is-showing-list", "is-showing-map", "is-mobile");
+    showListBtn.classList.remove("is-active");
+    showMapBtn.classList.remove("is-active");
+    return;
+  }
+
+  dashboardView.classList.add("is-mobile");
+  dashboardView.classList.toggle("is-showing-list", mobilePanel === "list");
+  dashboardView.classList.toggle("is-showing-map", mobilePanel === "map");
+  showListBtn.classList.toggle("is-active", mobilePanel === "list");
+  showMapBtn.classList.toggle("is-active", mobilePanel === "map");
+}
+
+function syncRoute(options = {}) {
+  const targetRoute = normalizeRoute(window.location.pathname);
+  currentRoute = targetRoute;
+
+  if (options.replace && window.location.pathname !== targetRoute) {
+    window.history.replaceState({}, "", targetRoute);
+  }
+
+  dashboardView.classList.toggle("hidden", targetRoute !== "/");
+  reservationsView.classList.toggle("hidden", targetRoute !== "/reservations");
+  document.body.classList.toggle("reservations-route", targetRoute === "/reservations");
+
+  routeLinks.forEach((link) => {
+    link.classList.toggle("is-active", (link.dataset.routeLink || "/") === targetRoute);
+  });
+}
+
+function navigateTo(pathname) {
+  const targetRoute = normalizeRoute(pathname);
+  if (window.location.pathname !== targetRoute) {
+    window.history.pushState({}, "", targetRoute);
+  }
+  syncRoute({ replace: true });
+  render();
 }
 
 function render() {
   renderSpots();
   renderMapView();
   renderBookings();
-  renderAdminSpots();
 }
 
 function renderSpots() {
@@ -704,6 +835,14 @@ function renderSpots() {
 
     card.addEventListener("click", () => {
       selectedMapSpotId = spot.id;
+      mobilePanel = "map";
+      syncViewportState();
+      renderSpots();
+      renderMapView();
+    });
+    card.addEventListener("mouseenter", () => {
+      if (selectedMapSpotId === spot.id) return;
+      selectedMapSpotId = spot.id;
       renderSpots();
       renderMapView();
     });
@@ -727,6 +866,7 @@ function renderSpots() {
 function renderMapView() {
   mapPins.innerHTML = "";
   const visibleSpots = getVisibleSpots();
+  let selectedPinPosition = null;
 
   if (!visibleSpots.length) {
     selectedMapSpotId = null;
@@ -740,20 +880,29 @@ function renderMapView() {
     visibleSpots.find((spot) => spot.id === selectedMapSpotId) || visibleSpots[0] || null;
 
   visibleSpots.slice(0, 8).forEach((spot, index) => {
+    const top = `${22 + ((index * 11) % 55)}%`;
+    const left = `${20 + ((index * 13) % 58)}%`;
     const pin = document.createElement("button");
     pin.type = "button";
     pin.className = "map-pin";
     pin.dataset.spotId = spot.id;
     pin.classList.toggle("is-active", spot.id === (selectedSpot && selectedSpot.id));
-    pin.style.top = `${22 + ((index * 11) % 55)}%`;
-    pin.style.left = `${20 + ((index * 13) % 58)}%`;
+    pin.style.top = top;
+    pin.style.left = left;
     pin.title = spot.name || spot.id;
     pin.addEventListener("click", () => {
       selectedMapSpotId = spot.id;
+      mobilePanel = "map";
+      syncViewportState();
       renderSpots();
       renderMapView();
+      scrollSelectedCardIntoView();
     });
     mapPins.appendChild(pin);
+
+    if (selectedSpot && spot.id === selectedSpot.id) {
+      selectedPinPosition = { top, left };
+    }
   });
 
   if (!selectedSpot) {
@@ -762,22 +911,35 @@ function renderMapView() {
     mapDetailZone.textContent = "Zone";
     mapDetailAvailability.textContent = "Availability";
     mapDetailPrice.textContent = "Price";
+    mapNavigateBtn.disabled = true;
     mapReserveBtn.disabled = true;
+    mapFocusChip.classList.add("hidden");
     return;
   }
 
   const rawAvailability = Number(selectedSpot.availableSpots || 0);
   const rawPrice = Number(selectedSpot.pricePerHour);
+  const priceText = Number.isFinite(rawPrice) ? `$${rawPrice.toFixed(2)}/hr` : "Price unavailable";
+  const availabilityText = selectedSpot.isAvailable
+    ? `${rawAvailability} ${rawAvailability === 1 ? "spot" : "spots"} left`
+    : "Full";
   mapDetailTitle.textContent = selectedSpot.name || selectedSpot.id;
   mapDetailMeta.textContent = selectedSpot.address || "Address unavailable";
   mapDetailZone.textContent = selectedSpot.zone || "Zone unavailable";
-  mapDetailAvailability.textContent = selectedSpot.isAvailable
-    ? `${rawAvailability} ${rawAvailability === 1 ? "spot" : "spots"} left`
-    : "Full";
-  mapDetailPrice.textContent = Number.isFinite(rawPrice)
-    ? `$${rawPrice.toFixed(2)}/hr`
-    : "Price unavailable";
+  mapDetailAvailability.textContent = availabilityText;
+  mapDetailPrice.textContent = priceText;
+  mapNavigateBtn.disabled = false;
   mapReserveBtn.disabled = !selectedSpot.isAvailable || !currentUser;
+
+  if (selectedPinPosition) {
+    mapFocusChip.style.top = selectedPinPosition.top;
+    mapFocusChip.style.left = selectedPinPosition.left;
+    mapFocusTitle.textContent = selectedSpot.name || selectedSpot.id;
+    mapFocusMeta.textContent = `${selectedSpot.zone || t("zoneLabel")} · ${priceText}`;
+    mapFocusChip.classList.remove("hidden");
+  } else {
+    mapFocusChip.classList.add("hidden");
+  }
 }
 
 function handleMapReserve() {
@@ -795,14 +957,58 @@ function handleMapReserve() {
   dialog.showModal();
 }
 
+function openNavigation(locationName, address) {
+  const destination = address && address.trim() ? address.trim() : `${locationName}, Seattle, WA`;
+  const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`;
+  window.open(url, "_blank");
+}
+
+function handleMapNavigate() {
+  const targetSpot = spots.find((spot) => spot.id === selectedMapSpotId);
+  if (!targetSpot) return;
+
+  openNavigation(
+    targetSpot.name || targetSpot.id,
+    targetSpot.address || targetSpot.location || ""
+  );
+}
+
+function openCheckInDialog(booking) {
+  selectedCheckInBookingId = booking.id;
+  ticketCodeInput.value = booking.ticketCode || "";
+  checkInReservationInfo.textContent = `Reservation ${booking.id.slice(0, 8)} · Space ${booking.spotId} · Enter the 6-digit paper ticket code from the garage gate.`;
+  checkInDialog.showModal();
+}
+
+async function handleCheckOut(booking) {
+  const confirmed = window.confirm(
+    `Check out Space ${booking.spotId} and settle parking charges now?`
+  );
+  if (!confirmed) return;
+
+  try {
+    await apiFetch("/api/check-out", {
+      method: "POST",
+      body: { reservationId: booking.id }
+    });
+    await refreshAll();
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
 function renderBookings() {
+  if (!bookingList) return;
+
   bookingList.innerHTML = "";
+
   if (!currentUser) {
     const hint = document.createElement("p");
     hint.textContent = t("signInToReservations");
     bookingList.appendChild(hint);
     return;
   }
+
   if (!myBookings.length) {
     const empty = document.createElement("p");
     empty.textContent = t("noReservationsYet");
@@ -812,13 +1018,52 @@ function renderBookings() {
 
   myBookings.forEach((booking) => {
     const node = bookingTemplate.content.cloneNode(true);
+    const statusEl = node.querySelector(".booking-status");
+    const ticketEl = node.querySelector(".booking-ticket");
+    const settlementEl = node.querySelector(".booking-settlement");
+    const checkInBtn = node.querySelector(".checkin-btn");
+    const checkOutBtn = node.querySelector(".checkout-btn");
     node.querySelector(".booking-spot").textContent = `Space ${booking.spotId}`;
-    node.querySelector(".booking-time").textContent =
-      `${fmtDate(booking.startTime)} - ${fmtDate(booking.endTime)}`;
+    statusEl.textContent = booking.status;
+    statusEl.classList.toggle("is-pending", booking.status === "PENDING");
+    statusEl.classList.toggle("is-active", booking.status === "ACTIVE");
+    statusEl.classList.toggle("is-completed", booking.status === "COMPLETED");
+    node.querySelector(".booking-time").textContent = `${fmtDate(booking.startTime)} - ${fmtDate(booking.endTime)}`;
     node.querySelector(".booking-plate").textContent = `${t("platePhone")} ${booking.plate} / ${t("phoneNumber")}: ${booking.phone}`;
     node.querySelector(".booking-owner").textContent = `${t("bookingOwner")} ${booking.ownerName}`;
 
+    if (booking.ticketCode) {
+      const checkInText = booking.checkInTime ? fmtDate(booking.checkInTime) : "Just now";
+      ticketEl.textContent = `Ticket ${booking.ticketCode} · Checked in ${checkInText}`;
+      ticketEl.classList.remove("hidden");
+    } else {
+      ticketEl.classList.add("hidden");
+    }
+
+    if (booking.status === "PENDING") {
+      checkInBtn.classList.remove("hidden");
+      checkInBtn.addEventListener("click", () => openCheckInDialog(booking));
+    } else {
+      checkInBtn.classList.add("hidden");
+    }
+
+    if (booking.status === "ACTIVE") {
+      checkOutBtn.classList.remove("hidden");
+      checkOutBtn.addEventListener("click", () => handleCheckOut(booking));
+    } else {
+      checkOutBtn.classList.add("hidden");
+    }
+
+    if (booking.status === "COMPLETED" && booking.finalAmount !== null) {
+      const checkOutText = booking.checkOutTime ? fmtDate(booking.checkOutTime) : "recently";
+      settlementEl.textContent = `Settled at $${Number(booking.finalAmount).toFixed(2)} · Checked out ${checkOutText}`;
+      settlementEl.classList.remove("hidden");
+    } else {
+      settlementEl.classList.add("hidden");
+    }
+
     const cancelBtn = node.querySelector(".cancel-btn");
+    cancelBtn.classList.toggle("hidden", booking.status === "COMPLETED");
     cancelBtn.addEventListener("click", async () => {
       try {
         await apiFetch(`/api/bookings/${booking.id}`, { method: "DELETE" });
@@ -827,43 +1072,8 @@ function renderBookings() {
         alert(error.message);
       }
     });
+
     bookingList.appendChild(node);
-  });
-}
-
-function renderAdminSpots() {
-  adminSpotList.innerHTML = "";
-  if (!currentUser || currentUser.role !== "admin") return;
-
-  spots.forEach((spot) => {
-    const row = document.createElement("article");
-    row.className = "booking-item card";
-    const content = document.createElement("div");
-    const title = document.createElement("strong");
-    title.textContent = `${spot.name || spot.id} · ${spot.zone}`;
-    const desc = document.createElement("p");
-    const isEnabled = spot.status === "active";
-    desc.textContent = `${spot.address || t("unavailableAddress")} · ${isEnabled ? t("enabled") : t("disabled")}`;
-    content.appendChild(title);
-    content.appendChild(desc);
-
-    const toggleBtn = document.createElement("button");
-    toggleBtn.className = "btn-secondary";
-    toggleBtn.textContent = isEnabled ? t("disabled") : t("enabled");
-    toggleBtn.addEventListener("click", async () => {
-      try {
-        await apiFetch(`/api/spots/${encodeURIComponent(spot.id)}/toggle`, {
-          method: "PATCH"
-        });
-        await refreshAll();
-      } catch (error) {
-        alert(error.message);
-      }
-    });
-
-    row.appendChild(content);
-    row.appendChild(toggleBtn);
-    adminSpotList.appendChild(row);
   });
 }
 
@@ -887,6 +1097,7 @@ async function recommendSpot(options = {}) {
     if (!recommended.length) {
       spots = [];
       renderSpots();
+      renderMapView();
       if (!silent) {
         alert(t("noSearchResults"));
       }
@@ -918,6 +1129,13 @@ async function recommendSpot(options = {}) {
 function getVisibleSpots() {
   if (!evOnlyFilter.checked) return spots;
   return spots.filter((spot) => spot.isEV && spot.isAvailable);
+}
+
+function scrollSelectedCardIntoView() {
+  if (!selectedMapSpotId) return;
+  const selectedCard = spotGrid.querySelector(`[data-spot-id="${CSS.escape(selectedMapSpotId)}"]`);
+  if (!selectedCard) return;
+  selectedCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 async function handleLogin() {
@@ -1039,47 +1257,39 @@ async function handleConfirmBooking(event) {
   }
 }
 
-async function handleCreateSpot(event) {
+async function handleConfirmCheckIn(event) {
   event.preventDefault();
-  const id = newSpotId.value.trim().toUpperCase();
-  const zone = newSpotZone.value.trim();
-  const location = newSpotLocation.value.trim();
-  if (!id || !zone || !location) {
-    alert("Please complete all parking space fields.");
-    return;
-  }
-  try {
-    await apiFetch("/api/spots", {
-      method: "POST",
-      body: { id, zone, location }
-    });
-    adminSpotForm.reset();
-    await refreshAll();
-  } catch (error) {
-    alert(error.message);
-  }
-}
 
-async function exportMyBookings() {
   if (!currentUser) {
-    alert("Please sign in before exporting.");
+    alert("Please sign in first.");
     return;
   }
+
+  if (!selectedCheckInBookingId) {
+    alert("Select a reservation to check in.");
+    return;
+  }
+
+  const ticketCode = ticketCodeInput.value.trim();
+  if (!/^\d{6}$/.test(ticketCode)) {
+    alert("Please enter a valid 6-digit ticket code.");
+    return;
+  }
+
   try {
-    const response = await fetch("/api/bookings/me/export", {
-      headers: authHeaders()
+    await apiFetch("/api/check-in", {
+      method: "POST",
+      body: {
+        reservationId: selectedCheckInBookingId,
+        ticketCode
+      }
     });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      throw new Error(data.error || "Export failed");
+    checkInDialog.close();
+    selectedCheckInBookingId = null;
+    await refreshAll();
+    if (currentRoute !== "/reservations") {
+      navigateTo("/reservations");
     }
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `campus-parking-${currentUser.name}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
   } catch (error) {
     alert(error.message);
   }
@@ -1208,31 +1418,6 @@ function refreshLucideIcons() {
   if (window.lucide) {
     window.lucide.createIcons();
   }
-}
-
-function setAnimatedStat(element, targetValue) {
-  if (!element) return;
-
-  if (statsAnimatedOnce) {
-    element.textContent = String(targetValue);
-    return;
-  }
-
-  const duration = 900;
-  const start = performance.now();
-
-  function tick(now) {
-    const progress = Math.min((now - start) / duration, 1);
-    const eased = 1 - Math.pow(1 - progress, 3);
-    const currentValue = Math.round(targetValue * eased);
-    element.textContent = String(currentValue);
-
-    if (progress < 1) {
-      requestAnimationFrame(tick);
-    }
-  }
-
-  requestAnimationFrame(tick);
 }
 
 function toLocalInput(date) {

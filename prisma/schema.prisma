@@ -9,6 +9,8 @@ datasource db {
 
 enum ReservationStatus {
   PENDING
+  ACTIVE
+  COMPLETED
   CONFIRMED
   CANCELLED
   EXPIRED
@@ -74,6 +76,10 @@ model Reservation {
   endTime     DateTime
   plateNumber String?
   phoneNumber String?
+  ticketCode  String?           @unique @db.VarChar(6)
+  checkInTime DateTime?
+  checkOutTime DateTime?
+  finalAmount Decimal?          @db.Decimal(10, 2)
   status      ReservationStatus @default(PENDING)
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
@@ -83,5 +89,8 @@ model Reservation {
   @@index([userId])
   @@index([spotId])
   @@index([status])
+  @@index([ticketCode])
+  @@index([checkInTime])
+  @@index([checkOutTime])
   @@index([startTime, endTime])
 }

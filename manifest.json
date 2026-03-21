@@ -1,0 +1,21 @@
+{
+  "name": "CampusPark Seattle",
+  "short_name": "CampusPark",
+  "description": "Smart parking reservation for Seattle urban campus.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#eff8f8",
+  "theme_color": "#0abab5",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ]
+}

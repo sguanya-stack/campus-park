@@ -2,45 +2,6 @@ require('dotenv').config();
 const cron = require('node-cron');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
-
-cron.schedule('* * * * *', async () => {
-  console.log('🔄 [CRON] Checking for expired reservations...');
-  
-  // Calculate the timestamp for 5 minutes ago
-  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-
-  try {
-    // Step A: Find all PENDING reservations older than 5 minutes
-    const expiredReservations = await prisma.reservation.findMany({
-      where: {
-        status: 'PENDING',
-        createdAt: { lt: fiveMinutesAgo }
-      }
-    });
-
-    if (expiredReservations.length === 0) return;
-
-    // Step B: Process each expired reservation safely using a transaction
-    for (const res of expiredReservations) {
-      await prisma.$transaction(async (tx) => {
-        // 1. Mark the reservation as EXPIRED
-        await tx.reservation.update({
-          where: { id: res.id },
-          data: { status: 'EXPIRED' }
-        });
-        
-        // 2. Restore the inventory: increment availableSpots by 1
-        await tx.parkingSpot.update({
-          where: { id: res.spotId },
-          data: { availableSpots: { increment: 1 } }
-        });
-      });
-      console.log(`⏱️ [CRON] Released spot for expired reservation ID: ${res.id}`);
-    }
-  } catch (error) {
-    console.error('❌ [CRON] Error processing expirations:', error);
-  }
-});
 const http = require("node:http");
 const fs = require("node:fs/promises");
 const path = require("node:path");
@@ -84,9 +45,9 @@ const MIME_TYPES = {
   ".jpeg": "image/jpeg",
   ".svg": "image/svg+xml"
 };
-const REALTIME_TICK_MS = 30_000;
-
-let simulationRunning = false;
+const SEATTLE_TIMEZONE = "America/Los_Angeles";
+const TRAFFIC_SIMULATION_CRON = "*/15 * * * *";
+const DEFAULT_HOURLY_RATE = 12;
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -209,7 +170,7 @@ server.on("error", (error) => {
   process.exit(1);
 });
 
-startRealtimeSpotSimulation();
+setupScheduledJobs();
 
 async function handleApi(req, res, url, pathname) {
   if (req.method === "GET" && pathname === "/api/health") {
@@ -414,9 +375,9 @@ async function handleApi(req, res, url, pathname) {
     const items = await prisma.reservation.findMany({
       where: {
         userId: session.user.id,
-        status: { in: ["PENDING", "CONFIRMED"] }
+        status: { in: ["PENDING", "ACTIVE", "CONFIRMED", "COMPLETED"] }
       },
-      orderBy: { startTime: "asc" }
+      orderBy: [{ status: "asc" }, { startTime: "asc" }]
     });
     sendJson(res, 200, {
       bookings: items.map((item) =>
@@ -432,9 +393,9 @@ async function handleApi(req, res, url, pathname) {
     const items = await prisma.reservation.findMany({
       where: {
         userId: session.user.id,
-        status: { in: ["PENDING", "CONFIRMED"] }
+        status: { in: ["PENDING", "ACTIVE", "CONFIRMED", "COMPLETED"] }
       },
-      orderBy: { startTime: "asc" }
+      orderBy: [{ status: "asc" }, { startTime: "asc" }]
     });
     const filename = `campus-parking-${encodeURIComponent(session.user.name)}.json`;
     res.statusCode = 200;
@@ -517,6 +478,124 @@ async function handleApi(req, res, url, pathname) {
     return;
   }
 
+  if (req.method === "POST" && pathname === "/api/check-in") {
+    const session = await requireSession(req, res);
+    if (!session) return;
+
+    const body = await readBody(req);
+    const reservationId = String(body.reservationId || "").trim();
+    const ticketCode = String(body.ticketCode || "").trim();
+
+    if (!reservationId || !/^\d{6}$/.test(ticketCode)) {
+      sendJson(res, 400, { error: "reservationId and a 6-digit ticketCode are required" });
+      return;
+    }
+
+    const reservation = await prisma.reservation.findUnique({
+      where: { id: reservationId }
+    });
+
+    if (!reservation) {
+      sendJson(res, 404, { error: "Reservation not found" });
+      return;
+    }
+
+    if (reservation.userId !== session.user.id && session.user.role !== "admin") {
+      sendJson(res, 403, { error: "Forbidden" });
+      return;
+    }
+
+    if (reservation.status !== "PENDING") {
+      sendJson(res, 409, { error: "Only PENDING reservations can be checked in" });
+      return;
+    }
+
+    try {
+      const checkedInReservation = await prisma.reservation.update({
+        where: { id: reservationId },
+        data: {
+          status: "ACTIVE",
+          ticketCode,
+          checkInTime: new Date()
+        }
+      });
+
+      sendJson(res, 200, {
+        ok: true,
+        booking: mapReservationForClient(checkedInReservation, session.user.name, session.user.role)
+      });
+    } catch (error) {
+      if (error && error.code === "P2002") {
+        sendJson(res, 409, { error: "This ticket code has already been used" });
+        return;
+      }
+      throw error;
+    }
+    return;
+  }
+
+  if (req.method === "POST" && pathname === "/api/check-out") {
+    const session = await requireSession(req, res);
+    if (!session) return;
+
+    const body = await readBody(req);
+    const reservationId = String(body.reservationId || "").trim();
+    if (!reservationId) {
+      sendJson(res, 400, { error: "reservationId is required" });
+      return;
+    }
+
+    const reservation = await prisma.reservation.findUnique({
+      where: { id: reservationId },
+      include: { spot: true }
+    });
+
+    if (!reservation) {
+      sendJson(res, 404, { error: "Reservation not found" });
+      return;
+    }
+
+    if (reservation.userId !== session.user.id && session.user.role !== "admin") {
+      sendJson(res, 403, { error: "Forbidden" });
+      return;
+    }
+
+    if (reservation.status !== "ACTIVE") {
+      sendJson(res, 409, { error: "Only ACTIVE reservations can be checked out" });
+      return;
+    }
+
+    const checkOutTime = new Date();
+    const billingStartTime = reservation.checkInTime || reservation.startTime;
+    const finalAmount = calculateReservationSettlement(
+      billingStartTime,
+      checkOutTime,
+      reservation.spot?.pricePerHour
+    );
+
+    const checkedOutReservation = await prisma.$transaction(async (tx) => {
+      await tx.parkingSpot.update({
+        where: { id: reservation.spotId },
+        data: { availableSpots: { increment: 1 } }
+      });
+
+      return tx.reservation.update({
+        where: { id: reservationId },
+        data: {
+          status: "COMPLETED",
+          checkOutTime,
+          finalAmount
+        }
+      });
+    });
+
+    sendJson(res, 200, {
+      ok: true,
+      booking: mapReservationForClient(checkedOutReservation, session.user.name, session.user.role)
+    });
+    return;
+  }
+
   if (req.method === "DELETE" && pathname.startsWith("/api/bookings/")) {
     const session = await requireSession(req, res);
     if (!session) return;
@@ -534,7 +613,7 @@ async function handleApi(req, res, url, pathname) {
     }
 
     await prisma.$transaction(async (tx) => {
-      if (booking.status === "PENDING" || booking.status === "CONFIRMED") {
+      if (booking.status === "PENDING" || booking.status === "ACTIVE" || booking.status === "CONFIRMED") {
         await tx.parkingSpot.update({
           where: { id: booking.spotId },
           data: { availableSpots: { increment: 1 } }
@@ -581,7 +660,8 @@ async function handleApi(req, res, url, pathname) {
 }
 
 async function serveStatic(req, res, pathname) {
-  const relativePath = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+  const spaPath = pathname === "/" || pathname === "/reservations" ? "index.html" : pathname.replace(/^\/+/, "");
+  const relativePath = spaPath;
   const filePath = path.join(ROOT, relativePath);
   const normalized = path.normalize(filePath);
   if (!normalized.startsWith(ROOT)) {
@@ -771,83 +851,102 @@ async function createReservation({
   }
 }
 
-function startRealtimeSpotSimulation() {
-  setInterval(async () => {
-    if (simulationRunning) return;
-    simulationRunning = true;
+function setupScheduledJobs() {
+  cron.schedule("* * * * *", expireStalePendingReservations, {
+    timezone: SEATTLE_TIMEZONE
+  });
+
+  cron.schedule(TRAFFIC_SIMULATION_CRON, async () => {
     try {
-      const changedZones = await applyRealtimeSpotSimulation();
-      if (changedZones.length > 0) {
-        console.log(`[sim] Updated zone availability: ${changedZones.join(", ")}`);
+      const summary = await applyTrafficSimulation();
+      if (summary.length > 0) {
+        console.log(`[traffic] Seattle availability refresh: ${summary.join(", ")}`);
       }
     } catch (error) {
-      console.error("[sim] Failed to update simulated spot data:", error);
-    } finally {
-      simulationRunning = false;
+      console.error("[traffic] Failed to refresh simulated traffic data:", error);
     }
-  }, REALTIME_TICK_MS).unref();
+  }, {
+    timezone: SEATTLE_TIMEZONE
+  });
 }
 
-async function applyRealtimeSpotSimulation() {
+async function expireStalePendingReservations() {
+  console.log("🔄 [CRON] Checking for expired reservations...");
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+
+  try {
+    const expiredReservations = await prisma.reservation.findMany({
+      where: {
+        status: "PENDING",
+        createdAt: { lt: fiveMinutesAgo }
+      }
+    });
+
+    if (expiredReservations.length === 0) return;
+
+    for (const reservation of expiredReservations) {
+      await prisma.$transaction(async (tx) => {
+        await tx.reservation.update({
+          where: { id: reservation.id },
+          data: { status: "EXPIRED" }
+        });
+
+        await tx.parkingSpot.update({
+          where: { id: reservation.spotId },
+          data: { availableSpots: { increment: 1 } }
+        });
+      });
+      console.log(`⏱️ [CRON] Released spot for expired reservation ID: ${reservation.id}`);
+    }
+  } catch (error) {
+    console.error("❌ [CRON] Error processing expirations:", error);
+  }
+}
+
+async function applyTrafficSimulation(now = new Date()) {
   const spots = await prisma.parkingSpot.findMany({
     where: { status: "active" },
     orderBy: [{ zone: "asc" }, { name: "asc" }]
   });
-  const zones = groupSpotsByZone(spots);
-  const changedZones = [];
+  if (spots.length === 0) return [];
 
-  for (const [zone, zoneSpots] of Object.entries(zones)) {
-    if (zoneSpots.length === 0) continue;
+  const seattleParts = getSeattleLocalTimeParts(now);
+  const trafficProfile = getSeattleTrafficProfile(seattleParts.hour);
+  const updates = [];
+  const summary = [];
 
-    const currentAvailable = zoneSpots.reduce(
-      (sum, spot) => sum + Number(spot.availableSpots || 0),
-      0
-    );
-    const totalSpots = zoneSpots.reduce((sum, spot) => sum + Number(spot.totalSpots || 0), 0);
+  for (const spot of spots) {
+    const totalSpots = Number(spot.totalSpots || 0);
     if (totalSpots <= 0) continue;
 
-    const requestedDelta = getRandomInt(1, Math.min(3, totalSpots)) * getRandomDirection();
-    const targetAvailable = clamp(currentAvailable + requestedDelta, 0, totalSpots);
-    const delta = targetAvailable - currentAvailable;
+    const jitter = randomInRange(-0.05, 0.05);
+    const occupancyRatio = clamp(trafficProfile.baseOccupancy + jitter, 0.2, 0.98);
+    const occupiedSpots = Math.min(
+      totalSpots - 1,
+      Math.max(0, Math.round(totalSpots * occupancyRatio))
+    );
+    const nextAvailableSpots = clamp(totalSpots - occupiedSpots, 1, totalSpots);
 
-    if (delta === 0) continue;
-
-    const mutableSpots = shuffle(
-      zoneSpots.map((spot) => ({
-        ...spot,
-        availableSpots: Number(spot.availableSpots || 0),
-        totalSpots: Number(spot.totalSpots || 0)
-      }))
+    updates.push(
+      prisma.parkingSpot.update({
+        where: { id: spot.id },
+        data: {
+          availableSpots: nextAvailableSpots,
+          fetchedAt: now
+        }
+      })
     );
 
-    let remaining = Math.abs(delta);
-    while (remaining > 0) {
-      const candidates =
-        delta > 0
-          ? mutableSpots.filter((spot) => spot.availableSpots < spot.totalSpots)
-          : mutableSpots.filter((spot) => spot.availableSpots > 0);
-
-      if (candidates.length === 0) break;
-
-      const targetSpot = candidates[Math.floor(Math.random() * candidates.length)];
-      targetSpot.availableSpots += delta > 0 ? 1 : -1;
-      remaining -= 1;
-    }
-
-    await prisma.$transaction(
-      mutableSpots.map((spot) =>
-        prisma.parkingSpot.update({
-          where: { id: spot.id },
-          data: { availableSpots: clamp(spot.availableSpots, 0, spot.totalSpots) }
-        })
-      )
+    summary.push(
+      `${spot.name}: ${nextAvailableSpots}/${totalSpots} (${trafficProfile.label}, ${seattleParts.hour}:00 PT)`
     );
-
-    const nextAvailable = mutableSpots.reduce((sum, spot) => sum + spot.availableSpots, 0);
-    changedZones.push(`${zone}: ${nextAvailable}/${totalSpots}`);
   }
 
-  return changedZones;
+  if (updates.length > 0) {
+    await prisma.$transaction(updates);
+  }
+
+  return summary;
 }
 
 function groupSpotsByZone(spots) {
@@ -860,25 +959,46 @@ function groupSpotsByZone(spots) {
   }, {});
 }
 
-function getRandomInt(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-function getRandomDirection() {
-  return Math.random() < 0.5 ? -1 : 1;
-}
-
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
-function shuffle(items) {
-  const copy = [...items];
-  for (let i = copy.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
+function randomInRange(min, max) {
+  return Math.random() * (max - min) + min;
+}
+
+function calculateReservationSettlement(startTimeInput, endTimeInput, hourlyRateInput) {
+  const startTime = parseDate(startTimeInput) || new Date();
+  const endTime = parseDate(endTimeInput) || new Date();
+  const durationMs = Math.max(endTime.getTime() - startTime.getTime(), 15 * 60 * 1000);
+  const quarterHours = Math.max(1, Math.ceil(durationMs / (15 * 60 * 1000)));
+  const billedHours = quarterHours / 4;
+  const hourlyRate = Number(hourlyRateInput || DEFAULT_HOURLY_RATE);
+  const safeRate = Number.isFinite(hourlyRate) && hourlyRate > 0 ? hourlyRate : DEFAULT_HOURLY_RATE;
+  return Number((billedHours * safeRate).toFixed(2));
+}
+
+function getSeattleLocalTimeParts(date = new Date()) {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: SEATTLE_TIMEZONE,
+    hour: "numeric",
+    hour12: false
+  });
+  const [{ value: hourValue }] = formatter.formatToParts(date).filter((part) => part.type === "hour");
+  return { hour: Number(hourValue) };
+}
+
+function getSeattleTrafficProfile(hour) {
+  if (hour >= 8 && hour < 10) {
+    return { label: "morning-rush", baseOccupancy: 0.9 };
   }
-  return copy;
+  if (hour >= 16 && hour < 18) {
+    return { label: "evening-rush", baseOccupancy: 0.93 };
+  }
+  if (hour >= 10 && hour < 16) {
+    return { label: "midday", baseOccupancy: 0.72 };
+  }
+  return { label: "off-peak", baseOccupancy: 0.58 };
 }
 
 function hashPassword(password, salt) {
@@ -945,6 +1065,13 @@ function mapReservationForClient(reservation, ownerName = "", ownerRole = "") {
     startTime: reservation.startTime,
     endTime: reservation.endTime,
     status: reservation.status,
+    ticketCode: reservation.ticketCode || "",
+    checkInTime: reservation.checkInTime,
+    checkOutTime: reservation.checkOutTime,
+    finalAmount:
+      reservation.finalAmount === null || typeof reservation.finalAmount === "undefined"
+        ? null
+        : Number(reservation.finalAmount),
     createdAt: reservation.createdAt
   };
 }

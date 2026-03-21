@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap");
 
 :root {
   --bg: #eff8f8;
@@ -33,12 +33,13 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: "Inter", sans-serif;
+  font-family: "Plus Jakarta Sans", sans-serif;
   color: var(--ink);
   background:
     radial-gradient(circle at top left, rgba(10, 186, 181, 0.1), transparent 28%),
     radial-gradient(circle at top right, rgba(10, 186, 181, 0.08), transparent 24%),
     linear-gradient(180deg, var(--bg-top) 0%, var(--bg) 100%);
+  overflow: hidden;
 }
 
 .bg-grid {
@@ -50,6 +51,41 @@ body {
     linear-gradient(var(--line) 1px, transparent 1px),
     linear-gradient(90deg, var(--line) 1px, transparent 1px);
   background-size: 28px 28px;
+}
+
+.install-prompt {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 300;
+  width: min(360px, calc(100vw - 20px));
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.install-prompt-copy strong {
+  display: block;
+  font-size: 15px;
+  color: #183247;
+}
+
+.install-prompt-copy p:last-child {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.install-prompt-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.install-prompt-actions .btn-primary,
+.install-prompt-actions .btn-secondary {
+  flex: 1 1 0;
 }
 
 .app-shell {
@@ -534,6 +570,42 @@ select:focus {
   color: var(--muted);
 }
 
+.booking-status {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 8px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  background: rgba(10, 186, 181, 0.08);
+  color: var(--accent-deep);
+}
+
+.booking-status.is-active {
+  background: rgba(10, 143, 139, 0.12);
+  color: var(--ok);
+}
+
+.booking-status.is-completed {
+  background: rgba(29, 78, 216, 0.1);
+  color: #1d4ed8;
+}
+
+.booking-status.is-pending {
+  background: rgba(255, 177, 66, 0.12);
+  color: #9a5d10;
+}
+
+.booking-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 190px;
+}
+
 .admin-panel,
 .reservations-section {
   padding: 14px;
@@ -668,6 +740,18 @@ select:focus {
   width: 100%;
 }
 
+.map-detail-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.map-detail-actions .btn-primary,
+.map-detail-actions .btn-secondary {
+  flex: 1 1 0;
+  width: auto;
+}
+
 .hidden {
   display: none;
 }
@@ -773,6 +857,15 @@ select:focus {
     position: relative;
     margin-top: 12px;
     padding: 12px;
+  }
+
+  .map-detail-actions {
+    flex-direction: column;
+  }
+
+  .map-detail-actions .btn-primary,
+  .map-detail-actions .btn-secondary {
+    width: 100%;
   }
 
   .controls {
@@ -939,5 +1032,447 @@ select:focus {
   .dialog menu button {
     flex: 1;
     min-height: 46px;
+  }
+}
+
+.app-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 18px;
+  overflow: hidden;
+}
+
+.topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  padding: 16px 18px;
+  align-items: center;
+}
+
+.brand-lockup {
+  min-width: 0;
+}
+
+.brand-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-deep);
+  background: rgba(10, 186, 181, 0.08);
+  border: 1px solid rgba(10, 186, 181, 0.14);
+}
+
+.session-cluster {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 14px;
+  align-items: center;
+}
+
+.top-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.nav-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1d4b57;
+  text-decoration: none;
+  background: rgba(10, 186, 181, 0.08);
+  border: 1px solid rgba(10, 186, 181, 0.12);
+  transition: all 0.2s ease;
+}
+
+.nav-link:hover,
+.nav-link.is-active {
+  color: var(--white);
+  background: linear-gradient(140deg, var(--accent) 0%, var(--accent-deep) 100%);
+  box-shadow: 0 10px 18px rgba(10, 186, 181, 0.18);
+}
+
+.session-meta {
+  min-width: 0;
+  text-align: right;
+}
+
+.session-meta strong {
+  display: block;
+  font-size: 14px;
+  color: #203244;
+}
+
+.session-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+  justify-content: flex-end;
+}
+
+.compact-field {
+  min-width: 150px;
+}
+
+.mobile-view-switch {
+  display: none;
+}
+
+.view-switch-btn {
+  border: 0;
+  border-radius: 999px;
+  min-height: 40px;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1d4b57;
+  background: rgba(10, 186, 181, 0.08);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.view-switch-btn.is-active {
+  color: var(--white);
+  background: linear-gradient(140deg, var(--accent) 0%, var(--accent-deep) 100%);
+  box-shadow: 0 10px 18px rgba(10, 186, 181, 0.18);
+}
+
+.split-layout {
+  grid-template-columns: minmax(320px, 38%) minmax(0, 62%);
+  gap: 18px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.left-pane {
+  padding: 0;
+  overflow: hidden;
+}
+
+.list-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+
+.search-panel {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: 18px 18px 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.9) 72%, rgba(255, 255, 255, 0.82) 100%);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(10, 186, 181, 0.12);
+}
+
+.search-copy .sub {
+  margin-top: 8px;
+  max-width: 40ch;
+}
+
+.search-controls {
+  position: static;
+  margin-top: 14px;
+  margin-bottom: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.search-field {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.search-field-wide {
+  flex-basis: 100%;
+}
+
+.list-results {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: 14px 18px 18px;
+}
+
+.spot-grid {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
+  align-content: start;
+  scrollbar-width: thin;
+}
+
+.spot-grid::-webkit-scrollbar {
+  width: 10px;
+}
+
+.spot-grid::-webkit-scrollbar-thumb {
+  background: rgba(10, 186, 181, 0.16);
+  border-radius: 999px;
+}
+
+.parking-spot-card {
+  padding: 16px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(245, 255, 255, 0.82)),
+    linear-gradient(0deg, rgba(10, 186, 181, 0.03), rgba(10, 186, 181, 0.03));
+  border: 1px solid rgba(255, 255, 255, 0.7);
+}
+
+.spot-location,
+.spot-status {
+  font-size: 13px;
+}
+
+.spot-status {
+  display: inline-flex;
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(10, 186, 181, 0.08);
+}
+
+.book-btn {
+  margin-top: 12px;
+}
+
+.right-pane,
+.map-view {
+  min-height: 0;
+  height: 100%;
+}
+
+.map-view {
+  position: relative;
+  top: auto;
+  padding: 20px;
+}
+
+.map-overlay {
+  max-width: 380px;
+}
+
+.map-detail {
+  max-width: 430px;
+}
+
+.map-focus-chip {
+  position: absolute;
+  z-index: 2;
+  min-width: 170px;
+  max-width: 220px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  box-shadow: 0 14px 30px rgba(15, 34, 48, 0.16);
+  backdrop-filter: blur(16px);
+  transform: translate(-50%, calc(-100% - 18px));
+  pointer-events: none;
+}
+
+.map-focus-chip strong,
+.map-focus-chip span {
+  display: block;
+}
+
+.map-focus-chip strong {
+  font-size: 13px;
+  color: #183247;
+}
+
+.map-focus-chip span {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.route-view {
+  min-height: 0;
+}
+
+.reservations-page {
+  min-height: 0;
+  overflow: auto;
+}
+
+.reservations-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  min-height: 0;
+}
+
+.reservations-hero,
+.reservations-content {
+  padding: 18px;
+}
+
+.reservations-list {
+  margin-top: 8px;
+}
+
+body.reservations-route {
+  overflow: auto;
+}
+
+@media (max-width: 992px) {
+  body {
+    overflow: auto;
+  }
+
+  .app-shell {
+    overflow: visible;
+  }
+
+  .topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .session-meta {
+    text-align: left;
+  }
+
+  .session-controls {
+    justify-content: flex-start;
+  }
+
+  .top-nav {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 768px) {
+  body {
+    overflow: auto;
+  }
+
+  .app-shell {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+    gap: 12px;
+  }
+
+  .topbar {
+    padding: 14px;
+  }
+
+  .split-layout {
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto minmax(320px, 44vh);
+    overflow: visible;
+  }
+
+  .mobile-view-switch {
+    display: flex;
+    gap: 8px;
+    padding: 10px;
+    align-items: center;
+    width: fit-content;
+  }
+
+  .split-layout.is-mobile {
+    align-items: start;
+  }
+
+  .split-layout.is-mobile.is-showing-map .left-pane {
+    display: none;
+  }
+
+  .split-layout.is-mobile.is-showing-list .right-pane {
+    display: none;
+  }
+
+  .left-pane {
+    max-height: none;
+  }
+
+  .list-shell,
+  .list-results,
+  .spot-grid {
+    min-height: auto;
+  }
+
+  .spot-grid {
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .search-panel,
+  .list-results {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .search-panel {
+    position: relative;
+  }
+
+  .search-controls {
+    gap: 8px;
+  }
+
+  .search-field,
+  .compact-field {
+    min-width: 100%;
+  }
+
+  .right-pane {
+    min-height: 320px;
+  }
+
+  .map-view {
+    min-height: 320px;
+    padding: 14px;
+  }
+
+  .map-overlay {
+    max-width: 100%;
+  }
+
+  .map-detail {
+    max-width: none;
+  }
+
+  .map-focus-chip {
+    max-width: 180px;
+  }
+
+  .install-prompt {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    width: auto;
+  }
+
+  .install-prompt-actions {
+    flex-direction: column;
   }
 }
