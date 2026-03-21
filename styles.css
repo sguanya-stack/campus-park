@@ -1130,6 +1130,10 @@ select:focus {
   justify-content: flex-end;
 }
 
+.compact-actions {
+  align-items: center;
+}
+
 .compact-field {
   min-width: 150px;
 }
@@ -1257,6 +1261,34 @@ select:focus {
   background: rgba(10, 186, 181, 0.08);
 }
 
+.spot-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.spot-metric {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #224456;
+  background: rgba(10, 186, 181, 0.07);
+  border: 1px solid rgba(10, 186, 181, 0.12);
+}
+
+.spot-metric-price {
+  color: var(--accent-deep);
+}
+
+.spot-metric-availability {
+  color: var(--ok);
+}
+
 .book-btn {
   margin-top: 12px;
 }
@@ -1316,6 +1348,65 @@ select:focus {
   min-height: 0;
 }
 
+.login-page,
+.admin-page {
+  min-height: 0;
+  overflow: auto;
+}
+
+.login-layout,
+.admin-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+}
+
+.login-hero,
+.login-panel,
+.admin-hero,
+.admin-content {
+  padding: 18px;
+}
+
+.login-form {
+  display: grid;
+  gap: 14px;
+  max-width: 520px;
+}
+
+.login-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.login-actions .btn-primary,
+.login-actions .btn-secondary {
+  flex: 1 1 0;
+}
+
+.admin-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-stat {
+  padding: 18px;
+}
+
+.admin-stat p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.admin-stat strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 30px;
+  color: var(--accent-deep);
+}
+
 .reservations-page {
   min-height: 0;
   overflow: auto;
@@ -1364,6 +1455,10 @@ body.reservations-route {
 
   .top-nav {
     justify-content: flex-start;
+  }
+
+  .admin-stats-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -1442,6 +1537,10 @@ body.reservations-route {
   .search-field,
   .compact-field {
     min-width: 100%;
+  }
+
+  .login-actions {
+    flex-direction: column;
   }
 
   .right-pane {

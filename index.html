@@ -25,34 +25,13 @@
           <nav class="top-nav" aria-label="Primary">
             <a href="/" class="nav-link" data-route-link="/" data-i18n="discoverLabel">Discover</a>
             <a href="/reservations" class="nav-link" data-route-link="/reservations" data-i18n="myReservations">My Reservations</a>
+            <a href="/admin" class="nav-link hidden" id="adminNavLink" data-route-link="/admin">Admin</a>
           </nav>
           <div class="session-meta">
             <p class="eyebrow" data-i18n="accountLabel">Account</p>
             <strong id="sessionDisplay">Not signed in</strong>
           </div>
-          <div class="session-controls">
-            <label class="auth-field compact-field">
-              <span data-i18n="usernameLabel">Username</span>
-              <input
-                id="userNameInput"
-                type="text"
-                placeholder="Enter your username"
-                aria-describedby="userNameError"
-                data-i18n-placeholder="usernamePlaceholder"
-              />
-              <span id="userNameError" class="field-error hidden" aria-live="polite"></span>
-            </label>
-            <label class="auth-field compact-field">
-              <span data-i18n="passwordLabel">Password</span>
-              <input
-                id="passwordInput"
-                type="password"
-                placeholder="Enter your password"
-                aria-describedby="passwordError"
-                data-i18n-placeholder="passwordPlaceholder"
-              />
-              <span id="passwordError" class="field-error hidden" aria-live="polite"></span>
-            </label>
+          <div class="session-controls compact-actions">
             <label class="lang-field compact-field">
               <span data-i18n="languageLabel">Language</span>
               <select id="lang-switcher" aria-label="Language switcher">
@@ -63,13 +42,58 @@
                 <option value="fr">Français</option>
               </select>
             </label>
-            <button id="loginBtn" class="btn-primary" data-i18n="signInBtn">Sign In</button>
-            <button id="registerBtn" class="btn-secondary" data-i18n="signUpBtn">Student Sign Up</button>
-            <button id="logoutBtn" class="btn-secondary" data-i18n="signOutBtn">Sign Out</button>
+            <button id="topLoginBtn" class="btn-primary" type="button" data-route-link="/login" data-i18n="signInBtn">Sign In</button>
+            <button id="logoutBtn" class="btn-secondary hidden" data-i18n="signOutBtn">Sign Out</button>
           </div>
         </div>
         <p id="authErrorMessage" class="auth-error hidden" aria-live="polite"></p>
         <p id="authSuccessMessage" class="auth-success hidden" aria-live="polite"></p>
+      </section>
+
+      <section id="loginView" class="login-page route-view hidden">
+        <div class="login-layout">
+          <section class="login-hero card">
+            <p class="eyebrow">CampusPark Access</p>
+            <h2>Sign in before you arrive</h2>
+            <p class="sub">Keep reservations, ticket check-in, and Seattle garage navigation under one account.</p>
+          </section>
+          <section class="login-panel card">
+            <div class="section-heading">
+              <div>
+                <h2 data-i18n="accountLabel">Account</h2>
+                <p data-i18n="defaultAdminNote">Default admin account: admin / admin123</p>
+              </div>
+            </div>
+            <div class="login-form">
+              <label class="auth-field">
+                <span data-i18n="usernameLabel">Username</span>
+                <input
+                  id="userNameInput"
+                  type="text"
+                  placeholder="Enter your username"
+                  aria-describedby="userNameError"
+                  data-i18n-placeholder="usernamePlaceholder"
+                />
+                <span id="userNameError" class="field-error hidden" aria-live="polite"></span>
+              </label>
+              <label class="auth-field">
+                <span data-i18n="passwordLabel">Password</span>
+                <input
+                  id="passwordInput"
+                  type="password"
+                  placeholder="Enter your password"
+                  aria-describedby="passwordError"
+                  data-i18n-placeholder="passwordPlaceholder"
+                />
+                <span id="passwordError" class="field-error hidden" aria-live="polite"></span>
+              </label>
+              <div class="login-actions">
+                <button id="loginBtn" class="btn-primary" type="button" data-i18n="signInBtn">Sign In</button>
+                <button id="registerBtn" class="btn-secondary" type="button" data-i18n="signUpBtn">Student Sign Up</button>
+              </div>
+            </div>
+          </section>
+        </div>
       </section>
 
       <div id="dashboardView" class="split-layout route-view">
@@ -191,6 +215,39 @@
           </section>
         </div>
       </section>
+
+      <section id="adminView" class="admin-page route-view hidden">
+        <div class="admin-layout">
+          <section class="admin-hero card">
+            <p class="eyebrow">Admin Console</p>
+            <h2>Operations and Inventory</h2>
+            <p class="sub">Use this view for system oversight. Keep the public experience focused on finding a spot fast.</p>
+          </section>
+          <section class="admin-stats-grid">
+            <article class="admin-stat card">
+              <p>Total Spaces</p>
+              <strong id="adminTotalCount">0</strong>
+            </article>
+            <article class="admin-stat card">
+              <p>Available Now</p>
+              <strong id="adminAvailableCount">0</strong>
+            </article>
+            <article class="admin-stat card">
+              <p>Today's Reservations</p>
+              <strong id="adminTodayBookingCount">0</strong>
+            </article>
+          </section>
+          <section class="admin-content card">
+            <div class="section-heading">
+              <div>
+                <h2>Inventory Snapshot</h2>
+                <p>Live parking inventory across the Seattle campus footprint.</p>
+              </div>
+            </div>
+            <div id="adminSpotList" class="booking-list"></div>
+          </section>
+        </div>
+      </section>
     </main>
 
     <div id="installPrompt" class="install-prompt card hidden" aria-live="polite">
@@ -243,11 +300,15 @@
         <div class="spot-top">
           <div class="spot-heading">
             <strong class="spot-id"></strong>
-            <span class="spot-ev hidden"></span>
           </div>
           <span class="spot-zone"></span>
         </div>
         <p class="spot-location"></p>
+        <div class="spot-metrics">
+          <span class="spot-metric spot-metric-availability"></span>
+          <span class="spot-metric spot-metric-price"></span>
+          <span class="spot-metric spot-ev hidden"></span>
+        </div>
         <p class="spot-status"></p>
         <button class="book-btn btn-primary" data-i18n="reserveBtn">Reserve</button>
       </article>

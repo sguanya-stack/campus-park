@@ -13,6 +13,7 @@ let searchDebounceTimer = null;
 let currentRoute = "/";
 let mobilePanel = "map";
 let deferredInstallPrompt = null;
+let adminStats = { total: 0, available: 0, todayBookings: 0 };
 
 const zoneFilter = document.getElementById("zoneFilter");
 const langSwitcher = document.getElementById("lang-switcher");
@@ -54,13 +55,21 @@ const authErrorMessage = document.getElementById("authErrorMessage");
 const authSuccessMessage = document.getElementById("authSuccessMessage");
 const loginBtn = document.getElementById("loginBtn");
 const registerBtn = document.getElementById("registerBtn");
+const topLoginBtn = document.getElementById("topLoginBtn");
 const logoutBtn = document.getElementById("logoutBtn");
+const loginView = document.getElementById("loginView");
 const dashboardView = document.getElementById("dashboardView");
 const reservationsView = document.getElementById("reservationsView");
+const adminView = document.getElementById("adminView");
 const routeLinks = [...document.querySelectorAll("[data-route-link]")];
+const adminNavLink = document.getElementById("adminNavLink");
 const showListBtn = document.getElementById("showListBtn");
 const showMapBtn = document.getElementById("showMapBtn");
 const cancelCheckInBtn = document.getElementById("cancelCheckInBtn");
+const adminTotalCount = document.getElementById("adminTotalCount");
+const adminAvailableCount = document.getElementById("adminAvailableCount");
+const adminTodayBookingCount = document.getElementById("adminTodayBookingCount");
+const adminSpotList = document.getElementById("adminSpotList");
 const installPrompt = document.getElementById("installPrompt");
 const installAppBtn = document.getElementById("installAppBtn");
 const dismissInstallPromptBtn = document.getElementById("dismissInstallPromptBtn");
@@ -633,6 +642,7 @@ async function restoreSession() {
 
 async function refreshAll() {
   await refreshSpots();
+  await refreshStats();
   if (currentUser) {
     await refreshMyBookings();
   } else {
@@ -659,6 +669,17 @@ async function refreshMyBookings() {
   myBookings = Array.isArray(result.bookings) ? result.bookings : [];
 }
 
+async function refreshStats() {
+  const at = new Date(arrivalTime.value || Date.now()).toISOString();
+  const query = new URLSearchParams({ at });
+  const result = await apiFetch(`/api/stats?${query.toString()}`, { auth: false });
+  adminStats = {
+    total: Number(result.total || 0),
+    available: Number(result.available || 0),
+    todayBookings: Number(result.todayBookings || 0)
+  };
+}
+
 function fillZoneOptions() {
   const current = zoneFilter.value || "all";
   zoneFilter.innerHTML = `<option value="all">${t("allZones")}</option>`;
@@ -675,14 +696,22 @@ function fillZoneOptions() {
 function syncSessionUi() {
   if (!currentUser) {
     sessionDisplay.textContent = t("notSignedIn");
+    logoutBtn.classList.add("hidden");
+    topLoginBtn.classList.remove("hidden");
+    adminNavLink.classList.add("hidden");
     return;
   }
   const roleLabel = currentUser.role === "admin" ? t("adminRole") : t("studentRole");
   sessionDisplay.textContent = `${currentUser.name} (${roleLabel})`;
+  logoutBtn.classList.remove("hidden");
+  topLoginBtn.classList.add("hidden");
+  adminNavLink.classList.toggle("hidden", currentUser.role !== "admin");
 }
 
 function normalizeRoute(pathname) {
   if (pathname === "/reservations") return "/reservations";
+  if (pathname === "/login") return "/login";
+  if (pathname === "/admin") return "/admin";
   return "/";
 }
 
@@ -751,12 +780,27 @@ function syncRoute(options = {}) {
     window.history.replaceState({}, "", targetRoute);
   }
 
-  dashboardView.classList.toggle("hidden", targetRoute !== "/");
-  reservationsView.classList.toggle("hidden", targetRoute !== "/reservations");
-  document.body.classList.toggle("reservations-route", targetRoute === "/reservations");
+  const safeRoute =
+    targetRoute === "/admin" && (!currentUser || currentUser.role !== "admin")
+      ? "/login"
+      : targetRoute === "/reservations" && !currentUser
+        ? "/login"
+        : targetRoute;
+
+  currentRoute = safeRoute;
+
+  if (options.replace && window.location.pathname !== safeRoute) {
+    window.history.replaceState({}, "", safeRoute);
+  }
+
+  loginView.classList.toggle("hidden", safeRoute !== "/login");
+  dashboardView.classList.toggle("hidden", safeRoute !== "/");
+  reservationsView.classList.toggle("hidden", safeRoute !== "/reservations");
+  adminView.classList.toggle("hidden", safeRoute !== "/admin");
+  document.body.classList.toggle("reservations-route", safeRoute === "/reservations");
 
   routeLinks.forEach((link) => {
-    link.classList.toggle("is-active", (link.dataset.routeLink || "/") === targetRoute);
+    link.classList.toggle("is-active", (link.dataset.routeLink || "/") === safeRoute);
   });
 }
 
@@ -773,6 +817,40 @@ function render() {
   renderSpots();
   renderMapView();
   renderBookings();
+  renderAdminView();
+}
+
+function renderAdminView() {
+  if (!adminView) return;
+
+  adminTotalCount.textContent = String(adminStats.total || 0);
+  adminAvailableCount.textContent = String(adminStats.available || 0);
+  adminTodayBookingCount.textContent = String(adminStats.todayBookings || 0);
+
+  adminSpotList.innerHTML = "";
+
+  if (!currentUser || currentUser.role !== "admin") {
+    const locked = document.createElement("p");
+    locked.textContent = "Admin access required.";
+    adminSpotList.appendChild(locked);
+    return;
+  }
+
+  spots.forEach((spot) => {
+    const item = document.createElement("article");
+    item.className = "booking-item card";
+    const body = document.createElement("div");
+    const title = document.createElement("strong");
+    const details = document.createElement("p");
+    const totalSpots = Number(spot.totalSpots || 0);
+    const availableSpots = Number(spot.availableSpots || 0);
+    title.textContent = `${spot.name || spot.id} · ${spot.zone || "Zone"}`;
+    details.textContent = `${availableSpots}/${totalSpots || "?"} available · ${spot.isEV ? "EV" : "Standard"} · ${spot.address || "Address unavailable"}`;
+    body.appendChild(title);
+    body.appendChild(details);
+    item.appendChild(body);
+    adminSpotList.appendChild(item);
+  });
 }
 
 function renderSpots() {
@@ -795,6 +873,8 @@ function renderSpots() {
     const evEl = node.querySelector(".spot-ev");
     const zoneEl = node.querySelector(".spot-zone");
     const locationEl = node.querySelector(".spot-location");
+    const availabilityMetricEl = node.querySelector(".spot-metric-availability");
+    const priceMetricEl = node.querySelector(".spot-metric-price");
     const statusEl = node.querySelector(".spot-status");
     const bookBtn = node.querySelector(".book-btn");
     const spotTitle = spot.name || spot.id;
@@ -825,8 +905,10 @@ function renderSpots() {
     } else {
       evEl.innerHTML = "";
     }
-    zoneEl.textContent = spot.zone;
-    locationEl.textContent = `${spotAddress} · ${priceText}`;
+    zoneEl.textContent = spot.zone || "Zone";
+    locationEl.textContent = spotAddress;
+    availabilityMetricEl.textContent = `${rawAvailability}/${Number(spot.totalSpots || 0) || "?"} spots`;
+    priceMetricEl.textContent = priceText;
     statusEl.textContent = statusText;
     statusEl.classList.remove("available", "occupied");
     statusEl.classList.add(spot.isAvailable ? "available" : "occupied");
@@ -1165,6 +1247,7 @@ async function handleLogin() {
     passwordInput.value = "";
     syncSessionUi();
     await refreshAll();
+    navigateTo(currentUser.role === "admin" ? "/admin" : "/");
   } catch (error) {
     showAuthError(error.message);
   }
@@ -1210,9 +1293,11 @@ async function handleLogout() {
   } catch {}
   clearToken();
   currentUser = null;
+  userNameInput.value = "";
   passwordInput.value = "";
   syncSessionUi();
   await refreshAll();
+  navigateTo("/");
 }
 
 async function handleConfirmBooking(event) {

@@ -660,7 +660,10 @@ async function handleApi(req, res, url, pathname) {
 }
 
 async function serveStatic(req, res, pathname) {
-  const spaPath = pathname === "/" || pathname === "/reservations" ? "index.html" : pathname.replace(/^\/+/, "");
+  const spaPath =
+    pathname === "/" || pathname === "/reservations" || pathname === "/login" || pathname === "/admin"
+      ? "index.html"
+      : pathname.replace(/^\/+/, "");
   const relativePath = spaPath;
   const filePath = path.join(ROOT, relativePath);
   const normalized = path.normalize(filePath);
