@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CampusPark</title>
+    <meta name="google-maps-api-key" content="" />
     <script src="https://unpkg.com/lucide@latest"></script>
     <link rel="stylesheet" href="styles.css" />
     <link rel="manifest" href="/manifest.json" />
@@ -160,11 +161,12 @@
 
         <aside class="right-pane">
           <div id="map-view" class="map-view card" aria-label="Map view placeholder">
+            <div id="googleMapCanvas" class="google-map-canvas" aria-hidden="true"></div>
             <div class="map-overlay">
               <p class="eyebrow" data-i18n="mapViewLabel">Map View</p>
               <h2 data-i18n="mapCanvasTitle">Seattle Parking Canvas</h2>
               <p data-i18n="mapCanvasSubtitle">
-                Reserved for Mapbox integration. Keep the map fixed while the inventory list scrolls independently.
+                Google Maps stays pinned while the inventory list scrolls independently.
               </p>
             </div>
             <div class="map-grid"></div>

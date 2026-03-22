@@ -637,6 +637,22 @@ select:focus {
     linear-gradient(0deg, rgba(10, 186, 181, 0.04), rgba(10, 186, 181, 0.04));
 }
 
+.google-map-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top left, rgba(10, 186, 181, 0.14), transparent 30%),
+    linear-gradient(180deg, rgba(227, 247, 247, 0.9) 0%, rgba(245, 252, 252, 0.84) 100%);
+}
+
+.google-map-canvas.is-unavailable {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .map-grid {
   position: absolute;
   inset: 0;
@@ -648,6 +664,11 @@ select:focus {
     radial-gradient(circle at 72% 48%, rgba(10, 186, 181, 0.06), transparent 20%);
   background-size: 34px 34px, 34px 34px, auto, auto;
   opacity: 0.9;
+  transition: opacity 0.2s ease;
+}
+
+.map-grid.is-muted {
+  opacity: 0.12;
 }
 
 .map-overlay {
@@ -659,6 +680,35 @@ select:focus {
   background: rgba(255, 255, 255, 0.86);
   border: 1px solid rgba(255, 255, 255, 0.66);
   box-shadow: 0 10px 24px rgba(10, 186, 181, 0.08);
+}
+
+.gm-style .gm-style-iw-c {
+  padding: 12px 14px !important;
+  border-radius: 16px !important;
+  box-shadow: 0 18px 36px rgba(15, 34, 48, 0.16) !important;
+}
+
+.gm-style .gm-style-iw-d {
+  overflow: hidden !important;
+}
+
+.gm-info-window {
+  min-width: 160px;
+  font-family: "Plus Jakarta Sans", sans-serif;
+  color: #244256;
+}
+
+.gm-info-window strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: #183247;
+}
+
+.gm-info-window div {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
 }
 
 .map-overlay p:last-child {
@@ -1478,11 +1528,45 @@ body.reservations-route {
     padding: 14px;
   }
 
+  .brand-title-row {
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .brand-badge {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .session-cluster,
+  .session-controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .session-meta {
+    width: 100%;
+  }
+
+  .top-nav {
+    width: 100%;
+    gap: 6px;
+  }
+
+  .nav-link,
+  .session-controls .btn-primary,
+  .session-controls .btn-secondary,
+  .compact-field {
+    width: 100%;
+  }
+
   .split-layout {
     display: grid;
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto minmax(320px, 44vh);
+    grid-template-rows: auto auto;
     overflow: visible;
+    height: auto;
+    gap: 12px;
   }
 
   .mobile-view-switch {
@@ -1490,7 +1574,12 @@ body.reservations-route {
     gap: 8px;
     padding: 10px;
     align-items: center;
-    width: fit-content;
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .view-switch-btn {
+    flex: 1 1 0;
   }
 
   .split-layout.is-mobile {
@@ -1507,12 +1596,13 @@ body.reservations-route {
 
   .left-pane {
     max-height: none;
+    min-height: 0;
   }
 
   .list-shell,
   .list-results,
   .spot-grid {
-    min-height: auto;
+    min-height: 0;
   }
 
   .spot-grid {
@@ -1532,6 +1622,8 @@ body.reservations-route {
 
   .search-controls {
     gap: 8px;
+    display: grid;
+    grid-template-columns: 1fr;
   }
 
   .search-field,
@@ -1544,24 +1636,38 @@ body.reservations-route {
   }
 
   .right-pane {
-    min-height: 320px;
+    min-height: 380px;
   }
 
   .map-view {
-    min-height: 320px;
+    position: relative;
+    top: auto;
+    height: min(68vh, 520px);
+    min-height: 380px;
     padding: 14px;
   }
 
   .map-overlay {
     max-width: 100%;
+    padding: 12px 14px;
   }
 
   .map-detail {
     max-width: none;
+    padding: 14px;
   }
 
   .map-focus-chip {
     max-width: 180px;
+  }
+
+  .map-detail-actions {
+    flex-direction: column;
+  }
+
+  .map-detail-actions .btn-primary,
+  .map-detail-actions .btn-secondary {
+    width: 100%;
   }
 
   .install-prompt {

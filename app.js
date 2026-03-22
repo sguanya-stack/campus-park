@@ -14,6 +14,13 @@ let currentRoute = "/";
 let mobilePanel = "map";
 let deferredInstallPrompt = null;
 let adminStats = { total: 0, available: 0, todayBookings: 0 };
+let googleMap = null;
+let googleInfoWindow = null;
+let googleMapsLoaderPromise = null;
+let googleGeocoder = null;
+let googleMapResizeTimer = null;
+const googleMarkers = new Map();
+const geocodeCache = new Map();
 
 const zoneFilter = document.getElementById("zoneFilter");
 const langSwitcher = document.getElementById("lang-switcher");
@@ -24,7 +31,9 @@ const evOnlyFilter = document.getElementById("evOnlyFilter");
 const recommendBtn = document.getElementById("recommendBtn");
 const spotGrid = document.getElementById("spotGrid");
 const bookingList = document.getElementById("bookingList");
+const mapGrid = document.querySelector("#map-view .map-grid");
 const mapPins = document.getElementById("mapPins");
+const googleMapCanvas = document.getElementById("googleMapCanvas");
 const mapDetailTitle = document.getElementById("mapDetailTitle");
 const mapDetailMeta = document.getElementById("mapDetailMeta");
 const mapDetailZone = document.getElementById("mapDetailZone");
@@ -124,7 +133,7 @@ const i18n = {
     reservationsSubtitle: "Upcoming and active bookings.",
     mapViewLabel: "Map View",
     mapCanvasTitle: "Seattle Parking Canvas",
-    mapCanvasSubtitle: "Reserved for Mapbox integration. Keep the map fixed while the inventory list scrolls independently.",
+    mapCanvasSubtitle: "Google Maps stays pinned while the inventory list scrolls independently.",
     selectedLocationLabel: "Selected Location",
     selectParkingLot: "Select a parking lot",
     mapDefaultMeta: "Choose a card on the left to preview the lot and inventory here.",
@@ -214,7 +223,7 @@ const i18n = {
     reservationsSubtitle: "即将开始和进行中的预约。",
     mapViewLabel: "地图视图",
     mapCanvasTitle: "西雅图停车地图",
-    mapCanvasSubtitle: "预留给 Mapbox 集成。左侧列表滚动时，右侧地图保持固定。",
+    mapCanvasSubtitle: "Google 地图保持固定，左侧车位列表可独立滚动。",
     selectedLocationLabel: "已选位置",
     selectParkingLot: "请选择一个停车点",
     mapDefaultMeta: "点击左侧卡片，在这里查看位置和库存。",
@@ -304,7 +313,7 @@ const i18n = {
     reservationsSubtitle: "Reservas activas y próximas.",
     mapViewLabel: "Vista del mapa",
     mapCanvasTitle: "Mapa de estacionamiento de Seattle",
-    mapCanvasSubtitle: "Reservado para integración con Mapbox.",
+    mapCanvasSubtitle: "Google Maps permanece fijo mientras la lista de inventario se desplaza por separado.",
     selectedLocationLabel: "Ubicación seleccionada",
     selectParkingLot: "Selecciona un estacionamiento",
     mapDefaultMeta: "Elige una tarjeta a la izquierda para ver detalles aquí.",
@@ -394,7 +403,7 @@ const i18n = {
     reservationsSubtitle: "Các đặt chỗ sắp tới và đang hoạt động.",
     mapViewLabel: "Bản đồ",
     mapCanvasTitle: "Bản đồ đỗ xe Seattle",
-    mapCanvasSubtitle: "Sẵn sàng để tích hợp Mapbox.",
+    mapCanvasSubtitle: "Google Maps được ghim cố định trong khi danh sách chỗ đỗ cuộn độc lập.",
     selectedLocationLabel: "Vị trí đã chọn",
     selectParkingLot: "Chọn một bãi đỗ xe",
     mapDefaultMeta: "Chọn thẻ bên trái để xem chi tiết tại đây.",
@@ -484,7 +493,7 @@ const i18n = {
     reservationsSubtitle: "Réservations actives et à venir.",
     mapViewLabel: "Vue carte",
     mapCanvasTitle: "Carte de stationnement de Seattle",
-    mapCanvasSubtitle: "Réservé à l'intégration Mapbox.",
+    mapCanvasSubtitle: "Google Maps reste fixe pendant que la liste d'inventaire défile séparément.",
     selectedLocationLabel: "Emplacement sélectionné",
     selectParkingLot: "Sélectionnez un parking",
     mapDefaultMeta: "Choisissez une carte à gauche pour prévisualiser l'emplacement ici.",
@@ -756,12 +765,121 @@ function isMobileViewport() {
   return window.innerWidth < 768;
 }
 
+function getGoogleMapsApiKey() {
+  const metaKey = document.querySelector('meta[name="google-maps-api-key"]')?.content?.trim();
+  return metaKey || window.CAMPUSPARK_GOOGLE_MAPS_API_KEY || "";
+}
+
+function loadGoogleMapsSdk() {
+  if (window.google?.maps) {
+    return Promise.resolve(window.google.maps);
+  }
+
+  if (googleMapsLoaderPromise) {
+    return googleMapsLoaderPromise;
+  }
+
+  const apiKey = getGoogleMapsApiKey();
+  if (!apiKey) {
+    return Promise.resolve(null);
+  }
+
+  googleMapsLoaderPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=marker`;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve(window.google.maps);
+    script.onerror = () => reject(new Error("Google Maps failed to load"));
+    document.head.appendChild(script);
+  });
+
+  return googleMapsLoaderPromise;
+}
+
+function scheduleGoogleMapResize() {
+  if (!googleMap || !window.google?.maps) return;
+  if (googleMapResizeTimer) {
+    clearTimeout(googleMapResizeTimer);
+  }
+  googleMapResizeTimer = window.setTimeout(() => {
+    window.google.maps.event.trigger(googleMap, "resize");
+    if (googleMarkers.size) {
+      const activeMarker = googleMarkers.get(selectedMapSpotId);
+      if (activeMarker) {
+        googleMap.panTo(activeMarker.getPosition());
+      }
+    }
+  }, 180);
+}
+
+async function ensureGoogleMap() {
+  const maps = await loadGoogleMapsSdk();
+  if (!maps) return null;
+
+  if (!googleMap) {
+    googleMap = new maps.Map(googleMapCanvas, {
+      center: { lat: 47.6225, lng: -122.3365 },
+      zoom: 14,
+      disableDefaultUI: true,
+      zoomControl: true,
+      mapTypeControl: false,
+      streetViewControl: false,
+      fullscreenControl: false,
+      styles: [
+        { featureType: "poi.business", stylers: [{ visibility: "off" }] },
+        { featureType: "transit", stylers: [{ visibility: "off" }] }
+      ]
+    });
+    googleInfoWindow = new maps.InfoWindow();
+    googleGeocoder = new maps.Geocoder();
+  }
+
+  return maps;
+}
+
+async function geocodeSpot(spot) {
+  const cacheKey = String(spot.id);
+  if (geocodeCache.has(cacheKey)) {
+    return geocodeCache.get(cacheKey);
+  }
+
+  const maps = await ensureGoogleMap();
+  if (!maps || !googleGeocoder) return null;
+
+  const fallbackQuery = `${spot.name || spot.id}, Seattle, WA`;
+  const query = (spot.address || spot.location || fallbackQuery).trim();
+
+  try {
+    const location = await new Promise((resolve, reject) => {
+      googleGeocoder.geocode({ address: query }, (results, status) => {
+        if (status === "OK" && results?.[0]?.geometry?.location) {
+          resolve(results[0].geometry.location);
+          return;
+        }
+        if (status === "ZERO_RESULTS") {
+          resolve(null);
+          return;
+        }
+        reject(new Error(status || "GEOCODE_ERROR"));
+      });
+    });
+    geocodeCache.set(cacheKey, location);
+    return location;
+  } catch (error) {
+    console.error("Failed to geocode spot:", spot.id, error);
+    geocodeCache.set(cacheKey, null);
+    return null;
+  }
+}
+
 function syncViewportState() {
   const isMobile = isMobileViewport();
   if (!isMobile) {
     dashboardView.classList.remove("is-showing-list", "is-showing-map", "is-mobile");
     showListBtn.classList.remove("is-active");
     showMapBtn.classList.remove("is-active");
+    scheduleGoogleMapResize();
     return;
   }
 
@@ -770,6 +888,9 @@ function syncViewportState() {
   dashboardView.classList.toggle("is-showing-map", mobilePanel === "map");
   showListBtn.classList.toggle("is-active", mobilePanel === "list");
   showMapBtn.classList.toggle("is-active", mobilePanel === "map");
+  if (mobilePanel === "map") {
+    scheduleGoogleMapResize();
+  }
 }
 
 function syncRoute(options = {}) {
@@ -1022,6 +1143,89 @@ function renderMapView() {
   } else {
     mapFocusChip.classList.add("hidden");
   }
+
+  renderGoogleMap(visibleSpots, selectedSpot).catch((error) => {
+    console.error("Google Map render failed:", error);
+  });
+}
+
+async function renderGoogleMap(visibleSpots, selectedSpot) {
+  const maps = await ensureGoogleMap();
+  if (!maps || !googleMap) {
+    googleMapCanvas.classList.add("is-unavailable");
+    mapPins.classList.remove("hidden");
+    mapGrid.classList.remove("is-muted");
+    return;
+  }
+
+  googleMapCanvas.classList.remove("is-unavailable");
+  mapPins.classList.add("hidden");
+  mapGrid.classList.add("is-muted");
+
+  const activeIds = new Set(visibleSpots.map((spot) => spot.id));
+  for (const [spotId, marker] of googleMarkers.entries()) {
+    if (!activeIds.has(spotId)) {
+      marker.setMap(null);
+      googleMarkers.delete(spotId);
+    }
+  }
+
+  const bounds = new maps.LatLngBounds();
+  let selectedMarkerLocation = null;
+
+  for (const spot of visibleSpots.slice(0, 12)) {
+    const location = await geocodeSpot(spot);
+    if (!location) continue;
+
+    let marker = googleMarkers.get(spot.id);
+    if (!marker) {
+      marker = new maps.Marker({
+        map: googleMap,
+        position: location,
+        title: spot.name || spot.id
+      });
+      marker.addListener("click", () => {
+        selectedMapSpotId = spot.id;
+        renderSpots();
+        renderMapView();
+        scrollSelectedCardIntoView();
+      });
+      googleMarkers.set(spot.id, marker);
+    } else {
+      marker.setMap(googleMap);
+      marker.setPosition(location);
+    }
+
+    marker.setIcon({
+      path: maps.SymbolPath.CIRCLE,
+      fillColor: selectedSpot && spot.id === selectedSpot.id ? "#089f9c" : "#0abab5",
+      fillOpacity: 1,
+      strokeColor: "#ffffff",
+      strokeWeight: 2,
+      scale: selectedSpot && spot.id === selectedSpot.id ? 9 : 7
+    });
+
+    if (selectedSpot && spot.id === selectedSpot.id) {
+      selectedMarkerLocation = location;
+      const rawPrice = Number(spot.pricePerHour);
+      const priceText = Number.isFinite(rawPrice) ? `$${rawPrice.toFixed(2)}/hr` : t("priceUnavailable");
+      googleInfoWindow.setContent(
+        `<div class="gm-info-window"><strong>${escapeHtml(spot.name || spot.id)}</strong><div>${escapeHtml(spot.address || spot.location || "Seattle, WA")}</div><div>${escapeHtml(priceText)}</div></div>`
+      );
+      googleInfoWindow.open({ anchor: marker, map: googleMap });
+    }
+
+    bounds.extend(location);
+  }
+
+  if (selectedMarkerLocation) {
+    googleMap.panTo(selectedMarkerLocation);
+    googleMap.setZoom(15);
+  } else if (!bounds.isEmpty()) {
+    googleMap.fitBounds(bounds, 64);
+  }
+
+  scheduleGoogleMapResize();
 }
 
 function handleMapReserve() {
@@ -1503,6 +1707,15 @@ function refreshLucideIcons() {
   if (window.lucide) {
     window.lucide.createIcons();
   }
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function toLocalInput(date) {
