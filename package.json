@@ -7,6 +7,7 @@
     "seed": "node seed.js",
     "prestart": "node scripts/kill-port.js",
     "start": "NODE_OPTIONS=--dns-result-order=ipv4first node server.js",
+    "postinstall": "prisma generate",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "prisma:seed": "node prisma/seed.js",
