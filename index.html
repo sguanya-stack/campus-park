@@ -6,6 +6,7 @@
     <title>CampusPark</title>
     <meta name="google-maps-api-key" content="" />
     <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="/node_modules/leaflet/dist/leaflet.css" />
     <link rel="stylesheet" href="styles.css" />
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#0abab5" />
@@ -161,19 +162,25 @@
 
         <aside class="right-pane">
           <div id="map-view" class="map-view card" aria-label="Map view placeholder">
-            <div id="googleMapCanvas" class="google-map-canvas" aria-hidden="true"></div>
             <div class="map-overlay">
               <p class="eyebrow" data-i18n="mapViewLabel">Map View</p>
               <h2 data-i18n="mapCanvasTitle">Seattle Parking Canvas</h2>
               <p data-i18n="mapCanvasSubtitle">
                 Google Maps stays pinned while the inventory list scrolls independently.
               </p>
+              <button id="heatmapToggle" class="heatmap-toggle active" type="button" aria-pressed="true">
+                <span class="heatmap-toggle-knob"></span>
+                <span>Popularity Heatmap</span>
+              </button>
             </div>
-            <div class="map-grid"></div>
-            <div id="mapPins" class="map-pins" aria-hidden="true"></div>
-            <div id="mapFocusChip" class="map-focus-chip hidden" aria-live="polite">
-              <strong id="mapFocusTitle"></strong>
-              <span id="mapFocusMeta"></span>
+            <div class="map-canvas-area">
+              <div id="leafletMapCanvas" class="google-map-canvas" aria-hidden="true"></div>
+              <div class="map-grid"></div>
+              <div id="mapPins" class="map-pins" aria-hidden="true"></div>
+              <div id="mapFocusChip" class="map-focus-chip hidden" aria-live="polite">
+                <strong id="mapFocusTitle"></strong>
+                <span id="mapFocusMeta"></span>
+              </div>
             </div>
             <div class="map-detail card">
               <p class="eyebrow" data-i18n="selectedLocationLabel">Selected Location</p>
@@ -303,7 +310,10 @@
           <div class="spot-heading">
             <strong class="spot-id"></strong>
           </div>
-          <span class="spot-zone"></span>
+          <div class="spot-badges">
+            <span class="spot-zone"></span>
+            <span class="spot-demand hidden">🔥 High Demand</span>
+          </div>
         </div>
         <p class="spot-location"></p>
         <div class="spot-metrics">
@@ -359,6 +369,8 @@
       </form>
     </dialog>
 
+    <script src="/node_modules/leaflet/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
     <script src="app.js"></script>
     <script>
       if ("serviceWorker" in navigator) {

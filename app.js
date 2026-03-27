@@ -1,5 +1,8 @@
 const TOKEN_KEY = "campus_parking_auth_token_v1";
 const LANG_KEY = "preferredLang";
+const API_BASE =
+  window.CAMPUSPARK_API_BASE ||
+  (window.location.protocol === "file:" ? "http://localhost:3000" : "");
 
 let currentUser = null;
 let authToken = localStorage.getItem(TOKEN_KEY) || "";
@@ -14,13 +17,23 @@ let currentRoute = "/";
 let mobilePanel = "map";
 let deferredInstallPrompt = null;
 let adminStats = { total: 0, available: 0, todayBookings: 0 };
-let googleMap = null;
-let googleInfoWindow = null;
-let googleMapsLoaderPromise = null;
-let googleGeocoder = null;
-let googleMapResizeTimer = null;
-const googleMarkers = new Map();
-const geocodeCache = new Map();
+let leafletMap = null;
+let leafletLayerGroup = null;
+let leafletMapResizeTimer = null;
+const leafletMarkers = new Map();
+const spotLatLngCache = new Map();
+let heatmapLayer = null;
+let heatmapData = [];
+let heatmapVisible = true;
+let heatmapRefreshTimer = null;
+
+const HEATMAP_GRADIENT = {
+  0.0: "rgba(0, 255, 0, 0)",
+  0.4: "rgba(0, 255, 0, 0.6)",
+  0.6: "rgba(255, 255, 0, 0.75)",
+  0.8: "rgba(255, 140, 0, 0.85)",
+  1.0: "rgba(255, 0, 0, 0.95)"
+};
 
 const zoneFilter = document.getElementById("zoneFilter");
 const langSwitcher = document.getElementById("lang-switcher");
@@ -32,8 +45,7 @@ const recommendBtn = document.getElementById("recommendBtn");
 const spotGrid = document.getElementById("spotGrid");
 const bookingList = document.getElementById("bookingList");
 const mapGrid = document.querySelector("#map-view .map-grid");
-const mapPins = document.getElementById("mapPins");
-const googleMapCanvas = document.getElementById("googleMapCanvas");
+const leafletMapCanvas = document.getElementById("leafletMapCanvas");
 const mapDetailTitle = document.getElementById("mapDetailTitle");
 const mapDetailMeta = document.getElementById("mapDetailMeta");
 const mapDetailZone = document.getElementById("mapDetailZone");
@@ -41,9 +53,7 @@ const mapDetailAvailability = document.getElementById("mapDetailAvailability");
 const mapDetailPrice = document.getElementById("mapDetailPrice");
 const mapNavigateBtn = document.getElementById("mapNavigateBtn");
 const mapReserveBtn = document.getElementById("mapReserveBtn");
-const mapFocusChip = document.getElementById("mapFocusChip");
-const mapFocusTitle = document.getElementById("mapFocusTitle");
-const mapFocusMeta = document.getElementById("mapFocusMeta");
+const heatmapToggle = document.getElementById("heatmapToggle");
 const dialog = document.getElementById("bookingDialog");
 const checkInDialog = document.getElementById("checkInDialog");
 const bookingForm = document.getElementById("bookingForm");
@@ -64,6 +74,7 @@ const authErrorMessage = document.getElementById("authErrorMessage");
 const authSuccessMessage = document.getElementById("authSuccessMessage");
 const loginBtn = document.getElementById("loginBtn");
 const registerBtn = document.getElementById("registerBtn");
+const loginRole = document.getElementById("loginRole");
 const topLoginBtn = document.getElementById("topLoginBtn");
 const logoutBtn = document.getElementById("logoutBtn");
 const loginView = document.getElementById("loginView");
@@ -88,6 +99,7 @@ const dismissIosHintBtn = document.getElementById("dismissIosHintBtn");
 const i18n = {
   en: {
     accountLabel: "Account",
+    roleLabel: "Role",
     usernameLabel: "Username",
     usernamePlaceholder: "Enter your username",
     passwordLabel: "Password",
@@ -133,7 +145,7 @@ const i18n = {
     reservationsSubtitle: "Upcoming and active bookings.",
     mapViewLabel: "Map View",
     mapCanvasTitle: "Seattle Parking Canvas",
-    mapCanvasSubtitle: "Google Maps stays pinned while the inventory list scrolls independently.",
+    mapCanvasSubtitle: "OpenStreetMap stays pinned while the inventory list scrolls independently.",
     selectedLocationLabel: "Selected Location",
     selectParkingLot: "Select a parking lot",
     mapDefaultMeta: "Choose a card on the left to preview the lot and inventory here.",
@@ -178,6 +190,7 @@ const i18n = {
   },
   zh: {
     accountLabel: "账户",
+    roleLabel: "角色",
     usernameLabel: "用户名",
     usernamePlaceholder: "请输入用户名",
     passwordLabel: "密码",
@@ -223,7 +236,7 @@ const i18n = {
     reservationsSubtitle: "即将开始和进行中的预约。",
     mapViewLabel: "地图视图",
     mapCanvasTitle: "西雅图停车地图",
-    mapCanvasSubtitle: "Google 地图保持固定，左侧车位列表可独立滚动。",
+    mapCanvasSubtitle: "OpenStreetMap 保持固定，左侧车位列表可独立滚动。",
     selectedLocationLabel: "已选位置",
     selectParkingLot: "请选择一个停车点",
     mapDefaultMeta: "点击左侧卡片，在这里查看位置和库存。",
@@ -268,6 +281,7 @@ const i18n = {
   },
   es: {
     accountLabel: "Cuenta",
+    roleLabel: "Rol",
     usernameLabel: "Nombre de usuario",
     usernamePlaceholder: "Ingresa tu nombre de usuario",
     passwordLabel: "Contraseña",
@@ -313,7 +327,7 @@ const i18n = {
     reservationsSubtitle: "Reservas activas y próximas.",
     mapViewLabel: "Vista del mapa",
     mapCanvasTitle: "Mapa de estacionamiento de Seattle",
-    mapCanvasSubtitle: "Google Maps permanece fijo mientras la lista de inventario se desplaza por separado.",
+    mapCanvasSubtitle: "OpenStreetMap permanece fijo mientras la lista de inventario se desplaza por separado.",
     selectedLocationLabel: "Ubicación seleccionada",
     selectParkingLot: "Selecciona un estacionamiento",
     mapDefaultMeta: "Elige una tarjeta a la izquierda para ver detalles aquí.",
@@ -358,6 +372,7 @@ const i18n = {
   },
   vi: {
     accountLabel: "Tài khoản",
+    roleLabel: "Vai trò",
     usernameLabel: "Tên đăng nhập",
     usernamePlaceholder: "Nhập tên đăng nhập",
     passwordLabel: "Mật khẩu",
@@ -403,7 +418,7 @@ const i18n = {
     reservationsSubtitle: "Các đặt chỗ sắp tới và đang hoạt động.",
     mapViewLabel: "Bản đồ",
     mapCanvasTitle: "Bản đồ đỗ xe Seattle",
-    mapCanvasSubtitle: "Google Maps được ghim cố định trong khi danh sách chỗ đỗ cuộn độc lập.",
+    mapCanvasSubtitle: "OpenStreetMap được ghim cố định trong khi danh sách chỗ đỗ cuộn độc lập.",
     selectedLocationLabel: "Vị trí đã chọn",
     selectParkingLot: "Chọn một bãi đỗ xe",
     mapDefaultMeta: "Chọn thẻ bên trái để xem chi tiết tại đây.",
@@ -448,6 +463,7 @@ const i18n = {
   },
   fr: {
     accountLabel: "Compte",
+    roleLabel: "Rôle",
     usernameLabel: "Nom d'utilisateur",
     usernamePlaceholder: "Entrez votre nom d'utilisateur",
     passwordLabel: "Mot de passe",
@@ -493,7 +509,7 @@ const i18n = {
     reservationsSubtitle: "Réservations actives et à venir.",
     mapViewLabel: "Vue carte",
     mapCanvasTitle: "Carte de stationnement de Seattle",
-    mapCanvasSubtitle: "Google Maps reste fixe pendant que la liste d'inventaire défile séparément.",
+    mapCanvasSubtitle: "OpenStreetMap reste fixe pendant que la liste d'inventaire défile séparément.",
     selectedLocationLabel: "Emplacement sélectionné",
     selectParkingLot: "Sélectionnez un parking",
     mapDefaultMeta: "Choisissez une carte à gauche pour prévisualiser l'emplacement ici.",
@@ -547,13 +563,25 @@ async function init() {
   syncRoute({ replace: true });
   setupInstallExperience();
   initI18n();
+  syncLoginRoleUi();
   await restoreSession();
   await refreshAll();
   syncSessionUi();
+  setupHeatmap();
   refreshLucideIcons();
 }
 
 function bindEvents() {
+  if (loginRole) {
+    loginRole.addEventListener("change", syncLoginRoleUi);
+  }
+  if (heatmapToggle) {
+    heatmapToggle.addEventListener("click", () => {
+      heatmapVisible = !heatmapVisible;
+      syncHeatmapToggleUi();
+      updateHeatmapLayer();
+    });
+  }
   zoneFilter.addEventListener("change", async () => {
     await refreshSpots();
     renderSpots();
@@ -632,6 +660,15 @@ function bindEvents() {
   window.addEventListener("resize", syncViewportState);
 }
 
+function syncLoginRoleUi() {
+  if (!loginRole) return;
+  const isAdmin = loginRole.value === "admin";
+  registerBtn.classList.toggle("hidden", isAdmin);
+  if (isAdmin && !userNameInput.value.trim()) {
+    userNameInput.value = "admin";
+  }
+}
+
 function setupDefaultArrival() {
   const now = new Date();
   now.setMinutes(0, 0, 0);
@@ -671,6 +708,70 @@ async function refreshSpots() {
   }
   const result = await apiFetch(`/api/spots?${query.toString()}`, { auth: false });
   spots = result.spots || [];
+}
+
+function syncHeatmapToggleUi() {
+  if (!heatmapToggle) return;
+  heatmapToggle.classList.toggle("active", heatmapVisible);
+  heatmapToggle.setAttribute("aria-pressed", String(heatmapVisible));
+}
+
+function ensureHeatmapLayer() {
+  const L = ensureLeafletMap();
+  if (!L || !L.heatLayer || !leafletMap) return null;
+  if (!heatmapLayer) {
+    heatmapLayer = L.heatLayer([], {
+      radius: 35,
+      blur: 24,
+      minOpacity: 0.7,
+      maxZoom: 17,
+      gradient: HEATMAP_GRADIENT
+    });
+  }
+  return heatmapLayer;
+}
+
+function updateHeatmapLayer() {
+  const layer = ensureHeatmapLayer();
+  if (!layer || !leafletMap) return;
+  const points = heatmapData.map((log) => [log.lat, log.lng, 1]);
+  layer.setLatLngs(points);
+  if (heatmapVisible) {
+    if (!leafletMap.hasLayer(layer)) {
+      layer.addTo(leafletMap);
+    }
+  } else if (leafletMap.hasLayer(layer)) {
+    leafletMap.removeLayer(layer);
+  }
+}
+
+async function fetchHeatmapData() {
+  try {
+    const data = await apiFetch("/api/analytics/heatmap", { auth: false });
+    heatmapData = Array.isArray(data) ? data : [];
+    updateHeatmapLayer();
+  } catch {
+    // Keep last known heatmap on transient failures.
+  }
+}
+
+function setupHeatmap() {
+  if (!heatmapToggle) return;
+  if (!window.L || !window.L.heatLayer) {
+    heatmapToggle.classList.add("hidden");
+    return;
+  }
+  syncHeatmapToggleUi();
+  fetchHeatmapData();
+  if (heatmapRefreshTimer) {
+    clearInterval(heatmapRefreshTimer);
+  }
+  heatmapRefreshTimer = window.setInterval(fetchHeatmapData, 60 * 1000);
+  window.addEventListener("beforeunload", () => {
+    if (heatmapRefreshTimer) {
+      clearInterval(heatmapRefreshTimer);
+    }
+  });
 }
 
 async function refreshMyBookings() {
@@ -765,112 +866,74 @@ function isMobileViewport() {
   return window.innerWidth < 768;
 }
 
-function getGoogleMapsApiKey() {
-  const metaKey = document.querySelector('meta[name="google-maps-api-key"]')?.content?.trim();
-  return metaKey || window.CAMPUSPARK_GOOGLE_MAPS_API_KEY || "";
-}
-
-function loadGoogleMapsSdk() {
-  if (window.google?.maps) {
-    return Promise.resolve(window.google.maps);
-  }
-
-  if (googleMapsLoaderPromise) {
-    return googleMapsLoaderPromise;
-  }
-
-  const apiKey = getGoogleMapsApiKey();
-  if (!apiKey) {
-    return Promise.resolve(null);
-  }
-
-  googleMapsLoaderPromise = new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=marker`;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => resolve(window.google.maps);
-    script.onerror = () => reject(new Error("Google Maps failed to load"));
-    document.head.appendChild(script);
+function configureLeafletIcons() {
+  if (!window.L || configureLeafletIcons.done) return;
+  configureLeafletIcons.done = true;
+  window.L.Icon.Default.mergeOptions({
+    iconRetinaUrl: "/node_modules/leaflet/dist/images/marker-icon-2x.png",
+    iconUrl: "/node_modules/leaflet/dist/images/marker-icon.png",
+    shadowUrl: "/node_modules/leaflet/dist/images/marker-shadow.png"
   });
-
-  return googleMapsLoaderPromise;
 }
 
-function scheduleGoogleMapResize() {
-  if (!googleMap || !window.google?.maps) return;
-  if (googleMapResizeTimer) {
-    clearTimeout(googleMapResizeTimer);
+function ensureLeafletMap() {
+  if (!window.L || !leafletMapCanvas) return null;
+  configureLeafletIcons();
+
+  if (!leafletMap) {
+    leafletMap = window.L.map(leafletMapCanvas, {
+      zoomControl: true,
+      attributionControl: true
+    });
+    window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors"
+    }).addTo(leafletMap);
+    leafletLayerGroup = window.L.layerGroup().addTo(leafletMap);
+    leafletMap.setView([47.615, -122.3384], 15);
   }
-  googleMapResizeTimer = window.setTimeout(() => {
-    window.google.maps.event.trigger(googleMap, "resize");
-    if (googleMarkers.size) {
-      const activeMarker = googleMarkers.get(selectedMapSpotId);
-      if (activeMarker) {
-        googleMap.panTo(activeMarker.getPosition());
-      }
-    }
+
+  return window.L;
+}
+
+function scheduleLeafletMapResize() {
+  if (!leafletMap) return;
+  if (leafletMapResizeTimer) {
+    clearTimeout(leafletMapResizeTimer);
+  }
+  leafletMapResizeTimer = window.setTimeout(() => {
+    leafletMap.invalidateSize();
   }, 180);
 }
 
-async function ensureGoogleMap() {
-  const maps = await loadGoogleMapsSdk();
-  if (!maps) return null;
-
-  if (!googleMap) {
-    googleMap = new maps.Map(googleMapCanvas, {
-      center: { lat: 47.6225, lng: -122.3365 },
-      zoom: 14,
-      disableDefaultUI: true,
-      zoomControl: true,
-      mapTypeControl: false,
-      streetViewControl: false,
-      fullscreenControl: false,
-      styles: [
-        { featureType: "poi.business", stylers: [{ visibility: "off" }] },
-        { featureType: "transit", stylers: [{ visibility: "off" }] }
-      ]
-    });
-    googleInfoWindow = new maps.InfoWindow();
-    googleGeocoder = new maps.Geocoder();
+function hashString(value) {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = ((hash << 5) - hash + value.charCodeAt(i)) | 0;
   }
-
-  return maps;
+  return Math.abs(hash);
 }
 
-async function geocodeSpot(spot) {
-  const cacheKey = String(spot.id);
-  if (geocodeCache.has(cacheKey)) {
-    return geocodeCache.get(cacheKey);
+function getSpotLatLng(spot, index) {
+  const cacheKey = String(spot.id || index);
+  const cached = spotLatLngCache.get(cacheKey);
+  if (cached) return cached;
+
+  const lat = Number(spot.latitude ?? spot.lat);
+  const lng = Number(spot.longitude ?? spot.lng ?? spot.lon);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    const coords = [lat, lng];
+    spotLatLngCache.set(cacheKey, coords);
+    return coords;
   }
 
-  const maps = await ensureGoogleMap();
-  if (!maps || !googleGeocoder) return null;
-
-  const fallbackQuery = `${spot.name || spot.id}, Seattle, WA`;
-  const query = (spot.address || spot.location || fallbackQuery).trim();
-
-  try {
-    const location = await new Promise((resolve, reject) => {
-      googleGeocoder.geocode({ address: query }, (results, status) => {
-        if (status === "OK" && results?.[0]?.geometry?.location) {
-          resolve(results[0].geometry.location);
-          return;
-        }
-        if (status === "ZERO_RESULTS") {
-          resolve(null);
-          return;
-        }
-        reject(new Error(status || "GEOCODE_ERROR"));
-      });
-    });
-    geocodeCache.set(cacheKey, location);
-    return location;
-  } catch (error) {
-    console.error("Failed to geocode spot:", spot.id, error);
-    geocodeCache.set(cacheKey, null);
-    return null;
-  }
+  const seedSource = `${spot.id || ""}${spot.name || ""}${spot.address || ""}${index}`;
+  const seed = hashString(seedSource);
+  const latOffset = ((seed % 1000) / 1000 - 0.5) * 0.01;
+  const lngOffset = (((seed / 1000) % 1000) / 1000 - 0.5) * 0.012;
+  const coords = [47.615 + latOffset, -122.3384 + lngOffset];
+  spotLatLngCache.set(cacheKey, coords);
+  return coords;
 }
 
 function syncViewportState() {
@@ -879,7 +942,7 @@ function syncViewportState() {
     dashboardView.classList.remove("is-showing-list", "is-showing-map", "is-mobile");
     showListBtn.classList.remove("is-active");
     showMapBtn.classList.remove("is-active");
-    scheduleGoogleMapResize();
+    scheduleLeafletMapResize();
     return;
   }
 
@@ -889,7 +952,7 @@ function syncViewportState() {
   showListBtn.classList.toggle("is-active", mobilePanel === "list");
   showMapBtn.classList.toggle("is-active", mobilePanel === "map");
   if (mobilePanel === "map") {
-    scheduleGoogleMapResize();
+    scheduleLeafletMapResize();
   }
 }
 
@@ -993,6 +1056,7 @@ function renderSpots() {
     const idEl = node.querySelector(".spot-id");
     const evEl = node.querySelector(".spot-ev");
     const zoneEl = node.querySelector(".spot-zone");
+    const demandEl = node.querySelector(".spot-demand");
     const locationEl = node.querySelector(".spot-location");
     const availabilityMetricEl = node.querySelector(".spot-metric-availability");
     const priceMetricEl = node.querySelector(".spot-metric-price");
@@ -1027,6 +1091,9 @@ function renderSpots() {
       evEl.innerHTML = "";
     }
     zoneEl.textContent = spot.zone || "Zone";
+    if (demandEl) {
+      demandEl.classList.toggle("hidden", !spot.highDemand);
+    }
     locationEl.textContent = spotAddress;
     availabilityMetricEl.textContent = `${rawAvailability}/${Number(spot.totalSpots || 0) || "?"} spots`;
     priceMetricEl.textContent = priceText;
@@ -1067,9 +1134,7 @@ function renderSpots() {
 }
 
 function renderMapView() {
-  mapPins.innerHTML = "";
   const visibleSpots = getVisibleSpots();
-  let selectedPinPosition = null;
 
   if (!visibleSpots.length) {
     selectedMapSpotId = null;
@@ -1082,32 +1147,6 @@ function renderMapView() {
   const selectedSpot =
     visibleSpots.find((spot) => spot.id === selectedMapSpotId) || visibleSpots[0] || null;
 
-  visibleSpots.slice(0, 8).forEach((spot, index) => {
-    const top = `${22 + ((index * 11) % 55)}%`;
-    const left = `${20 + ((index * 13) % 58)}%`;
-    const pin = document.createElement("button");
-    pin.type = "button";
-    pin.className = "map-pin";
-    pin.dataset.spotId = spot.id;
-    pin.classList.toggle("is-active", spot.id === (selectedSpot && selectedSpot.id));
-    pin.style.top = top;
-    pin.style.left = left;
-    pin.title = spot.name || spot.id;
-    pin.addEventListener("click", () => {
-      selectedMapSpotId = spot.id;
-      mobilePanel = "map";
-      syncViewportState();
-      renderSpots();
-      renderMapView();
-      scrollSelectedCardIntoView();
-    });
-    mapPins.appendChild(pin);
-
-    if (selectedSpot && spot.id === selectedSpot.id) {
-      selectedPinPosition = { top, left };
-    }
-  });
-
   if (!selectedSpot) {
     mapDetailTitle.textContent = "No parking lots found";
     mapDetailMeta.textContent = "Adjust filters or search terms to reveal matching locations.";
@@ -1116,7 +1155,7 @@ function renderMapView() {
     mapDetailPrice.textContent = "Price";
     mapNavigateBtn.disabled = true;
     mapReserveBtn.disabled = true;
-    mapFocusChip.classList.add("hidden");
+    renderLeafletMap(visibleSpots, null);
     return;
   }
 
@@ -1134,98 +1173,69 @@ function renderMapView() {
   mapNavigateBtn.disabled = false;
   mapReserveBtn.disabled = !selectedSpot.isAvailable || !currentUser;
 
-  if (selectedPinPosition) {
-    mapFocusChip.style.top = selectedPinPosition.top;
-    mapFocusChip.style.left = selectedPinPosition.left;
-    mapFocusTitle.textContent = selectedSpot.name || selectedSpot.id;
-    mapFocusMeta.textContent = `${selectedSpot.zone || t("zoneLabel")} · ${priceText}`;
-    mapFocusChip.classList.remove("hidden");
-  } else {
-    mapFocusChip.classList.add("hidden");
-  }
-
-  renderGoogleMap(visibleSpots, selectedSpot).catch((error) => {
-    console.error("Google Map render failed:", error);
-  });
+  renderLeafletMap(visibleSpots, selectedSpot);
 }
 
-async function renderGoogleMap(visibleSpots, selectedSpot) {
-  const maps = await ensureGoogleMap();
-  if (!maps || !googleMap) {
-    googleMapCanvas.classList.add("is-unavailable");
-    mapPins.classList.remove("hidden");
+function renderLeafletMap(visibleSpots, selectedSpot) {
+  const L = ensureLeafletMap();
+  if (!L || !leafletMap || !leafletMapCanvas) {
+    if (leafletMapCanvas) {
+      leafletMapCanvas.classList.add("is-unavailable");
+    }
+    mapGrid.classList.remove("hidden");
     mapGrid.classList.remove("is-muted");
     return;
   }
 
-  googleMapCanvas.classList.remove("is-unavailable");
-  mapPins.classList.add("hidden");
-  mapGrid.classList.add("is-muted");
+  leafletMapCanvas.classList.remove("is-unavailable");
+  mapGrid.classList.add("hidden");
 
-  const activeIds = new Set(visibleSpots.map((spot) => spot.id));
-  for (const [spotId, marker] of googleMarkers.entries()) {
-    if (!activeIds.has(spotId)) {
-      marker.setMap(null);
-      googleMarkers.delete(spotId);
-    }
+  if (leafletLayerGroup) {
+    leafletLayerGroup.clearLayers();
   }
+  leafletMarkers.clear();
 
-  const bounds = new maps.LatLngBounds();
-  let selectedMarkerLocation = null;
+  const bounds = L.latLngBounds();
+  let selectedLatLng = null;
 
-  for (const spot of visibleSpots.slice(0, 12)) {
-    const location = await geocodeSpot(spot);
-    if (!location) continue;
-
-    let marker = googleMarkers.get(spot.id);
-    if (!marker) {
-      marker = new maps.Marker({
-        map: googleMap,
-        position: location,
-        title: spot.name || spot.id
-      });
-      marker.addListener("click", () => {
-        selectedMapSpotId = spot.id;
-        renderSpots();
-        renderMapView();
-        scrollSelectedCardIntoView();
-      });
-      googleMarkers.set(spot.id, marker);
-    } else {
-      marker.setMap(googleMap);
-      marker.setPosition(location);
-    }
-
-    marker.setIcon({
-      path: maps.SymbolPath.CIRCLE,
-      fillColor: selectedSpot && spot.id === selectedSpot.id ? "#089f9c" : "#0abab5",
-      fillOpacity: 1,
-      strokeColor: "#ffffff",
-      strokeWeight: 2,
-      scale: selectedSpot && spot.id === selectedSpot.id ? 9 : 7
+  visibleSpots.slice(0, 12).forEach((spot, index) => {
+    const [lat, lng] = getSpotLatLng(spot, index);
+    const marker = L.marker([lat, lng], {
+      title: spot.name || spot.id
     });
+    const rawPrice = Number(spot.pricePerHour);
+    const rawAvailability = Number(spot.availableSpots || 0);
+    const priceText = Number.isFinite(rawPrice) ? `$${rawPrice.toFixed(2)}/hr` : t("priceUnavailable");
+    const availabilityText = spot.isAvailable
+      ? `${rawAvailability} ${rawAvailability === 1 ? t("spotLeft") : t("spotsLeft")}`
+      : t("fullBtn");
+    marker.bindPopup(
+      `<div class="leaflet-popup"><strong>${escapeHtml(spot.name || spot.id)}</strong><div>${escapeHtml(priceText)}</div><div>${escapeHtml(availabilityText)}</div></div>`
+    );
+    marker.on("click", () => {
+      selectedMapSpotId = spot.id;
+      renderSpots();
+      renderMapView();
+      scrollSelectedCardIntoView();
+    });
+    marker.addTo(leafletLayerGroup);
+    leafletMarkers.set(spot.id, marker);
+    bounds.extend([lat, lng]);
 
     if (selectedSpot && spot.id === selectedSpot.id) {
-      selectedMarkerLocation = location;
-      const rawPrice = Number(spot.pricePerHour);
-      const priceText = Number.isFinite(rawPrice) ? `$${rawPrice.toFixed(2)}/hr` : t("priceUnavailable");
-      googleInfoWindow.setContent(
-        `<div class="gm-info-window"><strong>${escapeHtml(spot.name || spot.id)}</strong><div>${escapeHtml(spot.address || spot.location || "Seattle, WA")}</div><div>${escapeHtml(priceText)}</div></div>`
-      );
-      googleInfoWindow.open({ anchor: marker, map: googleMap });
+      selectedLatLng = [lat, lng];
+      marker.openPopup();
     }
+  });
 
-    bounds.extend(location);
+  if (selectedLatLng) {
+    leafletMap.setView(selectedLatLng, 15);
+  } else if (bounds.isValid()) {
+    leafletMap.fitBounds(bounds, { padding: [40, 40] });
   }
 
-  if (selectedMarkerLocation) {
-    googleMap.panTo(selectedMarkerLocation);
-    googleMap.setZoom(15);
-  } else if (!bounds.isEmpty()) {
-    googleMap.fitBounds(bounds, 64);
-  }
-
-  scheduleGoogleMapResize();
+  updateHeatmapLayer();
+  scheduleLeafletMapResize();
 }
 
 function handleMapReserve() {
@@ -1245,7 +1255,7 @@ function handleMapReserve() {
 
 function openNavigation(locationName, address) {
   const destination = address && address.trim() ? address.trim() : `${locationName}, Seattle, WA`;
-  const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`;
+  const url = `https://www.openstreetmap.org/search?query=${encodeURIComponent(destination)}`;
   window.open(url, "_blank");
 }
 
@@ -1590,7 +1600,7 @@ async function apiFetch(path, options = {}) {
   if (options.auth !== false) {
     Object.assign(headers, authHeaders());
   }
-  const response = await fetch(path, {
+  const response = await fetch(`${API_BASE}${path}`, {
     method,
     headers,
     body: options.body ? JSON.stringify(options.body) : undefined

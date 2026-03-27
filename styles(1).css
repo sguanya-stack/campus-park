@@ -455,14 +455,6 @@ select:focus {
   gap: 10px;
 }
 
-.spot-badges {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
 .spot-heading {
   display: flex;
   align-items: center;
@@ -501,8 +493,7 @@ select:focus {
 }
 
 .spot-zone,
-.spot-ev,
-.spot-demand {
+.spot-ev {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -522,15 +513,6 @@ select:focus {
   background: linear-gradient(135deg, rgba(10, 186, 181, 0.14), rgba(10, 186, 181, 0.24));
   color: var(--accent-deep);
   border: 1px solid rgba(10, 186, 181, 0.18);
-}
-
-.spot-demand {
-  background: linear-gradient(135deg, rgba(255, 120, 66, 0.2), rgba(255, 189, 66, 0.28));
-  color: #9a4a0b;
-  border: 1px solid rgba(255, 140, 66, 0.3);
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
 }
 
 .spot-ev i {
@@ -703,63 +685,6 @@ select:focus {
   background: rgba(255, 255, 255, 0.86);
   border: 1px solid rgba(255, 255, 255, 0.66);
   box-shadow: 0 10px 24px rgba(10, 186, 181, 0.08);
-}
-
-.heatmap-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 12px;
-  padding: 8px 14px;
-  border-radius: 999px;
-  border: 1px solid rgba(10, 186, 181, 0.22);
-  background: rgba(255, 255, 255, 0.6);
-  color: #1b3142;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  backdrop-filter: blur(10px);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.heatmap-toggle:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 10px 20px rgba(15, 34, 48, 0.12);
-}
-
-.heatmap-toggle:focus-visible {
-  outline: 2px solid rgba(10, 186, 181, 0.6);
-  outline-offset: 2px;
-}
-
-.heatmap-toggle-knob {
-  width: 40px;
-  height: 20px;
-  border-radius: 999px;
-  background: rgba(10, 186, 181, 0.18);
-  position: relative;
-  transition: background 0.2s ease;
-}
-
-.heatmap-toggle-knob::after {
-  content: "";
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
-  transition: transform 0.2s ease;
-}
-
-.heatmap-toggle.active .heatmap-toggle-knob {
-  background: rgba(12, 166, 128, 0.5);
-}
-
-.heatmap-toggle.active .heatmap-toggle-knob::after {
-  transform: translateX(20px);
 }
 
 .gm-style .gm-style-iw-c {
@@ -1293,7 +1218,7 @@ select:focus {
 }
 
 .split-layout {
-  grid-template-columns: minmax(360px, 46%) minmax(0, 54%);
+  grid-template-columns: minmax(320px, 38%) minmax(0, 62%);
   gap: 18px;
   min-height: 0;
   overflow: hidden;
@@ -1301,8 +1226,7 @@ select:focus {
 
 .left-pane {
   padding: 0;
-  overflow: auto;
-  height: 100%;
+  overflow: hidden;
 }
 
 .list-shell {
@@ -1753,12 +1677,14 @@ body.reservations-route {
 
   .install-prompt {
     left: 10px;
+
     right: 10px;
     bottom: 10px;
     width: auto;
   }
 
   .install-prompt-actions {
+
     flex-direction: column;
   }
 }

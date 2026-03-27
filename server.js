@@ -1,7 +1,8 @@
 require('dotenv').config();
+const dns = require("node:dns");
 const cron = require('node-cron');
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+dns.setServers(["8.8.8.8", "1.1.1.1"]);
+const prisma = require("./prismaClient");
 const http = require("node:http");
 const fs = require("node:fs/promises");
 const path = require("node:path");
@@ -233,8 +234,8 @@ async function handleApi(req, res, url, pathname) {
       sendJson(res, 400, { error: "Password must be at least 6 characters" });
       return;
     }
-    if (!/^[A-Za-z0-9 _-]{2,20}$/.test(name)) {
-      sendJson(res, 400, { error: "Name must be 2-20 characters" });
+    if (!/^[\p{L}\p{N} _-]{2,20}$/u.test(name)) {
+      sendJson(res, 400, { error: "Name must be 2-20 characters (letters/numbers/space/_/-)" });
       return;
     }
     const passwordSalt = crypto.randomBytes(16).toString("hex");
@@ -297,6 +298,7 @@ async function handleApi(req, res, url, pathname) {
     const at = parseDate(url.searchParams.get("at")) || new Date();
     const zone = url.searchParams.get("zone");
     const search = String(url.searchParams.get("search") || "").trim();
+    const since = new Date(Date.now() - 12 * 60 * 60 * 1000);
     const spots = await prisma.parkingSpot.findMany({
       where: {
         zone: zone && zone !== "all" ? zone : undefined,
@@ -310,8 +312,45 @@ async function handleApi(req, res, url, pathname) {
       orderBy: [{ zone: "asc" }, { name: "asc" }]
     });
 
-    const mapped = spots.map((spot) => withPrismaSpotStatus(spot, at));
+    const recentSearches = await prisma.searchLog.findMany({
+      where: {
+        createdAt: { gte: since }
+      },
+      select: { lat: true, lng: true }
+    });
+
+    const mapped = spots.map((spot, index) => {
+      const mappedSpot = withPrismaSpotStatus(spot, at);
+      const coords = getSpotCoordsForDemand(mappedSpot, index);
+      const demandCount = coords ? countNearbySearches(coords, recentSearches, 500) : 0;
+      const highDemand = demandCount > 20;
+      const basePrice = Number(mappedSpot.pricePerHour);
+      const adjustedPrice = Number.isFinite(basePrice)
+        ? Number((basePrice * (highDemand ? 1.5 : 1)).toFixed(2))
+        : mappedSpot.pricePerHour;
+
+      return {
+        ...mappedSpot,
+        pricePerHour: adjustedPrice,
+        surgeMultiplier: highDemand ? 1.5 : 1,
+        highDemand,
+        demandSearchCount: demandCount
+      };
+    });
     sendJson(res, 200, { spots: mapped });
+    return;
+  }
+
+  if (req.method === "GET" && pathname === "/api/analytics/heatmap") {
+    const since = new Date(Date.now() - 12 * 60 * 60 * 1000);
+    const points = await prisma.searchLog.findMany({
+      where: {
+        createdAt: { gte: since }
+      },
+      select: { lat: true, lng: true },
+      orderBy: { createdAt: "desc" }
+    });
+    sendJson(res, 200, points);
     return;
   }
 
@@ -1043,6 +1082,52 @@ function withPrismaSpotStatus(spot, at) {
     isAvailable,
     checkedAt: at.toISOString()
   };
+}
+
+function hashString(input) {
+  let hash = 0;
+  for (let i = 0; i < input.length; i += 1) {
+    hash = (hash * 31 + input.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+
+function getSpotCoordsForDemand(spot, index) {
+  const lat = Number(spot.latitude ?? spot.lat);
+  const lng = Number(spot.longitude ?? spot.lng ?? spot.lon);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    return { lat, lng };
+  }
+
+  const seedSource = `${spot.id || ""}${spot.externalLocationId || ""}${spot.slug || ""}${spot.name || ""}${spot.address || ""}${index}`;
+  const seed = hashString(seedSource);
+  const latOffset = ((seed % 1000) / 1000 - 0.5) * 0.01;
+  const lngOffset = (((seed / 1000) % 1000) / 1000 - 0.5) * 0.012;
+  return { lat: 47.615 + latOffset, lng: -122.3384 + lngOffset };
+}
+
+function countNearbySearches(coords, logs, radiusMeters) {
+  if (!coords || !logs.length) return 0;
+  let count = 0;
+  for (const log of logs) {
+    if (distanceMeters(coords, log) <= radiusMeters) count += 1;
+  }
+  return count;
+}
+
+function distanceMeters(a, b) {
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const earthRadius = 6371000;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const sinLat = Math.sin(dLat / 2);
+  const sinLng = Math.sin(dLng / 2);
+  const h =
+    sinLat * sinLat +
+    Math.cos(lat1) * Math.cos(lat2) * sinLng * sinLng;
+  return 2 * earthRadius * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
 function countTodayBookings(bookings) {

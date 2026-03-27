@@ -5,7 +5,8 @@
   "description": "Campus parking app with Node.js backend",
   "scripts": {
     "seed": "node seed.js",
-    "start": "node server.js",
+    "prestart": "node scripts/kill-port.js",
+    "start": "NODE_OPTIONS=--dns-result-order=ipv4first node server.js",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "prisma:seed": "node prisma/seed.js",
@@ -19,7 +20,9 @@
     "csv-parser": "^3.2.0",
     "dotenv": "^16.4.7",
     "fs-extra": "^11.3.4",
+    "leaflet": "^1.9.4",
     "node-cron": "^4.2.1",
-    "prisma": "^5.22.0"
+    "prisma": "^5.22.0",
+    "react-leaflet": "^5.0.0"
   }
 }

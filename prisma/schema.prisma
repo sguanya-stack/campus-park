@@ -94,3 +94,12 @@ model Reservation {
   @@index([checkOutTime])
   @@index([startTime, endTime])
 }
+
+model SearchLog {
+  id        String   @id @default(cuid())
+  lat       Float
+  lng       Float
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
