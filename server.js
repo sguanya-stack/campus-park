@@ -10,31 +10,6 @@ const crypto = require("node:crypto");
 
 const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
-const DATA_DIR = path.join(ROOT, "data");
-const DB_PATH = path.join(DATA_DIR, "db.json");
-const DEFAULT_USERS = [
-  {
-    id: "user-admin",
-    name: "admin",
-    role: "admin",
-    passwordSalt: "campuspark-admin-salt",
-    passwordHash:
-      "fe66cc3192a3aa6be57d6b5e34dd357e9ebfe5e7f769e020780c8f9ee384f495d4554c821d778c3c543ac3b5ebe5db7391010c6a9f98fb877693c1f14a22edee",
-    createdAt: "2026-03-19T00:00:00.000Z"
-  }
-];
-const DEFAULT_SPOTS = [
-  { id: "A-01", zone: "Library Zone", location: "Library North Entrance", available: true, isEV: true },
-  { id: "A-02", zone: "Library Zone", location: "Library North Entrance", available: true },
-  { id: "A-03", zone: "Library Zone", location: "Library West Side", available: false },
-  { id: "B-11", zone: "Academic Zone", location: "Academic Hall 1", available: true, isEV: true },
-  { id: "B-12", zone: "Academic Zone", location: "Academic Hall 2", available: true },
-  { id: "B-13", zone: "Academic Zone", location: "Lab Building East", available: false },
-  { id: "C-21", zone: "Residence Zone", location: "Residence Hall 3", available: true },
-  { id: "C-22", zone: "Residence Zone", location: "Residence Hall 4", available: true, isEV: true },
-  { id: "D-31", zone: "Athletics Zone", location: "Arena South Entrance", available: true },
-  { id: "D-32", zone: "Athletics Zone", location: "Track Entrance", available: false }
-];
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -49,17 +24,40 @@ const MIME_TYPES = {
 const SEATTLE_TIMEZONE = "America/Los_Angeles";
 const TRAFFIC_SIMULATION_CRON = "*/15 * * * *";
 const DEFAULT_HOURLY_RATE = 12;
+const DEV_ALLOWED_ORIGINS = new Set(
+  (process.env.CORS_ORIGIN || "http://localhost:3000")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+);
 
 const server = http.createServer(async (req, res) => {
   try {
     const parsedUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
     const pathname = decodeURIComponent(parsedUrl.pathname);
+    const origin = req.headers.origin;
+
+    if (origin && DEV_ALLOWED_ORIGINS.has(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+      res.setHeader("Vary", "Origin");
+    }
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
+
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
 
     if (req.method === 'GET' && parsedUrl.pathname === '/api/recommend') {
       try {
         const zone = parsedUrl.searchParams.get('zone');
         const sortBy = parsedUrl.searchParams.get('sortBy');
         const search = parsedUrl.searchParams.get('search');
+        const lat = parseFloat(parsedUrl.searchParams.get('lat'));
+        const lng = parseFloat(parsedUrl.searchParams.get('lng'));
         let orderByLogic = { availableSpots: 'desc' };
         if (sortBy === 'price') {
           orderByLogic = { pricePerHour: 'asc' };
@@ -70,7 +68,7 @@ const server = http.createServer(async (req, res) => {
           status: 'active'
         };
 
-        if (zone && zone !== 'All Zones') {
+        if (zone && zone !== 'all' && zone !== 'All Zones') {
           whereClause.zone = zone;
         }
 
@@ -87,6 +85,10 @@ const server = http.createServer(async (req, res) => {
           take: 50
         });
 
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          prisma.searchLog.create({ data: { lat, lng } }).catch(() => {});
+        }
+
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, count: recommendedSpots.length, data: recommendedSpots }));
       } catch (error) {
@@ -96,49 +98,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === 'POST' && parsedUrl.pathname === '/api/reserve') {
-      let body = '';
-
-      req.on('data', (chunk) => {
-        body += chunk.toString();
-      });
-
-      req.on('end', async () => {
-        try {
-          const { userId, spotId, startTime, endTime } = JSON.parse(body);
-
-          const reservation = await prisma.$transaction(async (tx) => {
-            const spot = await tx.parkingSpot.findUnique({ where: { id: spotId } });
-            if (!spot) throw new Error('Target parking spot does not exist.');
-            if (spot.availableSpots <= 0) {
-              throw new Error('Race condition prevented: Spot is no longer available.');
-            }
-
-            await tx.parkingSpot.update({
-              where: { id: spotId },
-              data: { availableSpots: { decrement: 1 } }
-            });
-
-            return await tx.reservation.create({
-              data: {
-                userId: userId,
-                spotId: spotId,
-                startTime: new Date(startTime),
-                endTime: new Date(endTime),
-                status: 'PENDING'
-              }
-            });
-          });
-
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: true, data: reservation, message: 'Spot locked successfully.' }));
-        } catch (error) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, message: error.message }));
-        }
-      });
-      return;
-    }
+    // /api/reserve removed — unauthenticated, superseded by /api/bookings which enforces session
 
     if (pathname.startsWith("/api/")) {
       await handleApi(req, res, parsedUrl, pathname);
@@ -458,7 +418,7 @@ async function handleApi(req, res, url, pathname) {
     if (!session) return;
     const body = await readBody(req);
 
-    const spotId = String(body.spotId || "").trim().toUpperCase();
+    const spotId = String(body.spotId || "").trim();
     const plate = String(body.plate || "").trim().toUpperCase();
     const phone = String(body.phone || "").trim();
     const start = parseDate(body.startTime);
@@ -720,6 +680,11 @@ async function serveStatic(req, res, pathname) {
     const body = await fs.readFile(normalized);
     res.statusCode = 200;
     res.setHeader("Content-Type", MIME_TYPES[ext] || "application/octet-stream");
+    // Prevent stale JS/CSS/HTML caching during development
+    if ([".html", ".js", ".css"].includes(ext)) {
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+    }
     if (req.method === "HEAD") {
       res.end();
       return;
@@ -808,39 +773,6 @@ async function ensureDefaultAdminUser() {
   });
 }
 
-async function readDb() {
-  await ensureDb();
-  const raw = await fs.readFile(DB_PATH, "utf8");
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    parsed = {};
-  }
-  return {
-    spots: Array.isArray(parsed.spots) && parsed.spots.length ? parsed.spots : [...DEFAULT_SPOTS],
-    bookings: Array.isArray(parsed.bookings) ? parsed.bookings : [],
-    sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
-    users: Array.isArray(parsed.users) && parsed.users.length ? parsed.users : [...DEFAULT_USERS]
-  };
-}
-
-async function writeDb(db) {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  const tmp = `${DB_PATH}.tmp`;
-  await fs.writeFile(tmp, `${JSON.stringify(db, null, 2)}\n`, "utf8");
-  await fs.rename(tmp, DB_PATH);
-}
-
-async function ensureDb() {
-  try {
-    await fs.access(DB_PATH);
-  } catch {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    const initial = { spots: DEFAULT_SPOTS, bookings: [], sessions: [], users: DEFAULT_USERS };
-    await fs.writeFile(DB_PATH, `${JSON.stringify(initial, null, 2)}\n`, "utf8");
-  }
-}
 
 async function createReservation({
   userId,
@@ -933,10 +865,17 @@ async function expireStalePendingReservations() {
           data: { status: "EXPIRED" }
         });
 
-        await tx.parkingSpot.update({
+        // Clamp availableSpots to totalSpots to prevent double-fire overflow
+        const spot = await tx.parkingSpot.findUnique({
           where: { id: reservation.spotId },
-          data: { availableSpots: { increment: 1 } }
+          select: { availableSpots: true, totalSpots: true }
         });
+        if (spot && spot.availableSpots < spot.totalSpots) {
+          await tx.parkingSpot.update({
+            where: { id: reservation.spotId },
+            data: { availableSpots: { increment: 1 } }
+          });
+        }
       });
       console.log(`⏱️ [CRON] Released spot for expired reservation ID: ${reservation.id}`);
     }

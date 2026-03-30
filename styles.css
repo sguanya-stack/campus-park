@@ -883,7 +883,7 @@ select:focus {
 }
 
 .hidden {
-  display: none;
+  display: none !important;
 }
 
 .dialog {
@@ -1497,6 +1497,33 @@ select:focus {
 .admin-hero,
 .admin-content {
   padding: 18px;
+}
+
+.login-role-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 16px;
+  max-width: 520px;
+}
+
+.role-tab {
+  flex: 1;
+  padding: 9px 16px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-muted, #6b7280);
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.role-tab.active {
+  color: var(--accent, #0d9488);
+  border-bottom-color: var(--accent, #0d9488);
 }
 
 .login-form {

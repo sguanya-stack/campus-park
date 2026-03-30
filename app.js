@@ -2,7 +2,11 @@ const TOKEN_KEY = "campus_parking_auth_token_v1";
 const LANG_KEY = "preferredLang";
 const API_BASE =
   window.CAMPUSPARK_API_BASE ||
-  (window.location.protocol === "file:" ? "http://localhost:3000" : "");
+  (["localhost", "127.0.0.1"].includes(window.location.hostname)
+    ? "http://localhost:3000"
+    : window.location.protocol === "file:"
+      ? "http://localhost:3000"
+      : "");
 
 let currentUser = null;
 let authToken = localStorage.getItem(TOKEN_KEY) || "";
@@ -565,15 +569,47 @@ async function init() {
   initI18n();
   syncLoginRoleUi();
   await restoreSession();
-  await refreshAll();
+  // Try loading data; if it fails on cold start, retry once after a short delay
+  try {
+    await refreshAll();
+  } catch (_) {
+    await new Promise(r => setTimeout(r, 1200));
+    try {
+      await refreshAll();
+    } catch (err) {
+      console.error("Failed to load parking data:", err);
+      // Show a non-blocking banner so the user knows to refresh
+      const banner = document.createElement("p");
+      banner.textContent = "⚠️ Could not load parking data. Please refresh the page.";
+      banner.style.cssText = "background:#fef2f2;color:#b91c1c;padding:10px 16px;text-align:center;margin:0;font-size:13px;";
+      document.querySelector(".app-shell")?.prepend(banner);
+    }
+  }
   syncSessionUi();
   setupHeatmap();
   refreshLucideIcons();
 }
 
+const roleTabStudent = document.getElementById("roleTabStudent");
+const roleTabAdmin   = document.getElementById("roleTabAdmin");
+
 function bindEvents() {
   if (loginRole) {
     loginRole.addEventListener("change", syncLoginRoleUi);
+  }
+  if (roleTabStudent && roleTabAdmin) {
+    roleTabStudent.addEventListener("click", () => {
+      roleTabStudent.classList.add("active");
+      roleTabAdmin.classList.remove("active");
+      registerBtn.classList.remove("hidden");
+      userNameInput.placeholder = userNameInput.getAttribute("data-i18n-placeholder") || "Enter your username";
+    });
+    roleTabAdmin.addEventListener("click", () => {
+      roleTabAdmin.classList.add("active");
+      roleTabStudent.classList.remove("active");
+      registerBtn.classList.add("hidden");
+      userNameInput.value = userNameInput.value || "";
+    });
   }
   if (heatmapToggle) {
     heatmapToggle.addEventListener("click", () => {
@@ -583,7 +619,7 @@ function bindEvents() {
     });
   }
   zoneFilter.addEventListener("change", async () => {
-    await refreshSpots();
+    try { await refreshSpots(); } catch (_) {}
     renderSpots();
     renderMapView();
   });
@@ -608,7 +644,7 @@ function bindEvents() {
   passwordInput.addEventListener("input", clearPasswordError);
   passwordInput.addEventListener("input", clearAuthError);
   arrivalTime.addEventListener("change", async () => {
-    await refreshSpots();
+    try { await refreshSpots(); } catch (_) {}
     renderSpots();
     renderMapView();
   });
@@ -734,7 +770,9 @@ function ensureHeatmapLayer() {
 function updateHeatmapLayer() {
   const layer = ensureHeatmapLayer();
   if (!layer || !leafletMap) return;
-  const points = heatmapData.map((log) => [log.lat, log.lng, 1]);
+  const points = heatmapData
+    .filter((log) => Number.isFinite(log.lat) && Number.isFinite(log.lng))
+    .map((log) => [log.lat, log.lng, 1]);
   layer.setLatLngs(points);
   if (heatmapVisible) {
     if (!leafletMap.hasLayer(layer)) {
@@ -869,6 +907,7 @@ function isMobileViewport() {
 function configureLeafletIcons() {
   if (!window.L || configureLeafletIcons.done) return;
   configureLeafletIcons.done = true;
+  window.L.Icon.Default.imagePath = "";
   window.L.Icon.Default.mergeOptions({
     iconRetinaUrl: "/node_modules/leaflet/dist/images/marker-icon-2x.png",
     iconUrl: "/node_modules/leaflet/dist/images/marker-icon.png",
@@ -891,6 +930,7 @@ function ensureLeafletMap() {
     }).addTo(leafletMap);
     leafletLayerGroup = window.L.layerGroup().addTo(leafletMap);
     leafletMap.setView([47.615, -122.3384], 15);
+    scheduleLeafletMapResize();
   }
 
   return window.L;
@@ -1387,6 +1427,10 @@ async function recommendSpot(options = {}) {
       query.set("search", search);
     }
 
+    const center = leafletMap ? leafletMap.getCenter() : { lat: 47.615, lng: -122.3384 };
+    query.set("lat", center.lat.toFixed(6));
+    query.set("lng", center.lng.toFixed(6));
+
     const result = await apiFetch(`/api/recommend?${query.toString()}`, { auth: false });
     const recommended = Array.isArray(result.data) ? result.data : [];
 
@@ -1527,6 +1571,10 @@ async function handleConfirmBooking(event) {
   const startTime = new Date(arrivalTime.value);
   const durationHours = Number(duration.value);
 
+  if (!plate || !/^[A-Z0-9]{2,8}$/.test(plate)) {
+    alert("Invalid licence plate. Use 2–8 letters/digits (e.g., ABC1234).");
+    return;
+  }
   if (!isValidDate(startTime)) {
     alert("Please select a valid arrival time.");
     return;
@@ -1600,11 +1648,16 @@ async function apiFetch(path, options = {}) {
   if (options.auth !== false) {
     Object.assign(headers, authHeaders());
   }
-  const response = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers,
-    body: options.body ? JSON.stringify(options.body) : undefined
-  });
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers,
+      body: options.body ? JSON.stringify(options.body) : undefined
+    });
+  } catch {
+    throw new Error("Network error — please check your connection and try again.");
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(data.message || data.error || "Request failed");

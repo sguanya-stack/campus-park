@@ -19,15 +19,14 @@
         <div class="brand-lockup">
           <p class="eyebrow" data-i18n="heroEyebrow">Campus Mobility</p>
           <div class="brand-title-row">
-            <h1 data-i18n="appTitle">CampusPark</h1>
+            <h1><a href="/" data-route-link="/" style="text-decoration:none;color:inherit;" data-i18n="appTitle">CampusPark</a></h1>
             <span class="brand-badge" data-i18n="resultsSubtitle">Live inventory, compact cards, faster scanning.</span>
           </div>
         </div>
         <div class="session-cluster">
           <nav class="top-nav" aria-label="Primary">
-            <a href="/" class="nav-link" data-route-link="/" data-i18n="discoverLabel">Discover</a>
             <a href="/reservations" class="nav-link" data-route-link="/reservations" data-i18n="myReservations">My Reservations</a>
-            <a href="/admin" class="nav-link hidden" id="adminNavLink" data-route-link="/admin">Admin</a>
+            <a href="/admin" class="nav-link hidden" id="adminNavLink" data-route-link="/admin" data-i18n="adminLabel">Admin Panel</a>
           </nav>
           <div class="session-meta">
             <p class="eyebrow" data-i18n="accountLabel">Account</p>
@@ -63,8 +62,11 @@
             <div class="section-heading">
               <div>
                 <h2 data-i18n="accountLabel">Account</h2>
-                <p data-i18n="defaultAdminNote">Default admin account: admin / admin123</p>
               </div>
+            </div>
+            <div class="login-role-tabs">
+              <button class="role-tab active" id="roleTabStudent" type="button" data-i18n="studentTab">Student</button>
+              <button class="role-tab" id="roleTabAdmin" type="button" data-i18n="adminTab">Admin</button>
             </div>
             <div class="login-form">
               <label class="auth-field">
