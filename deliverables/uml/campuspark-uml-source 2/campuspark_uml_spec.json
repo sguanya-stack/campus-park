@@ -1,0 +1,224 @@
+{
+  "title": "CampusPark System UML Component Diagram",
+  "subtitle": "Based on the current codebase: index.html, app.js, server.js, Prisma schema, service-worker.js",
+  "nodes": [
+    {
+      "id": "client",
+      "x": 40,
+      "y": 520,
+      "w": 220,
+      "h": 200,
+      "title": "Browser SPA",
+      "lines": [
+        "index.html",
+        "app.js",
+        "styles.css",
+        "Views: Discover / Login / Reservations / Admin",
+        "Functions: routing, rendering, fetch API, i18n"
+      ],
+      "fill": "#F6D8AE"
+    },
+    {
+      "id": "pwa",
+      "x": 40,
+      "y": 360,
+      "w": 220,
+      "h": 120,
+      "title": "PWA Shell",
+      "lines": [
+        "manifest.json",
+        "service-worker.js",
+        "Install prompt and cache shell"
+      ],
+      "fill": "#D9EAD3"
+    },
+    {
+      "id": "map",
+      "x": 40,
+      "y": 180,
+      "w": 220,
+      "h": 130,
+      "title": "Map / Navigation",
+      "lines": [
+        "Leaflet + OpenStreetMap tiles",
+        "Spot preview",
+        "External navigation deep link"
+      ],
+      "fill": "#CFE2F3"
+    },
+    {
+      "id": "server",
+      "x": 310,
+      "y": 120,
+      "w": 520,
+      "h": 600,
+      "title": "Node.js Backend",
+      "lines": [
+        "server.js HTTP server",
+        "Static file serving + API routing"
+      ],
+      "fill": "#F3F0FF"
+    },
+    {
+      "id": "router",
+      "parent": "server",
+      "x": 340,
+      "y": 620,
+      "w": 190,
+      "h": 70,
+      "title": "Router / Middleware",
+      "lines": [
+        "parse request, CORS, JSON"
+      ],
+      "fill": "#FFFFFF"
+    },
+    {
+      "id": "auth",
+      "parent": "server",
+      "x": 340,
+      "y": 520,
+      "w": 190,
+      "h": 80,
+      "title": "Auth Module",
+      "lines": [
+        "login / register / logout / session",
+        "password hash + session token"
+      ],
+      "fill": "#FFFFFF"
+    },
+    {
+      "id": "parking",
+      "parent": "server",
+      "x": 560,
+      "y": 520,
+      "w": 230,
+      "h": 80,
+      "title": "Parking Module",
+      "lines": [
+        "spots / recommend / heatmap / stats",
+        "filters + availability queries"
+      ],
+      "fill": "#FFFFFF"
+    },
+    {
+      "id": "booking",
+      "parent": "server",
+      "x": 340,
+      "y": 400,
+      "w": 190,
+      "h": 90,
+      "title": "Booking Module",
+      "lines": [
+        "create / cancel / export",
+        "check-in / check-out",
+        "status transitions"
+      ],
+      "fill": "#FFFFFF"
+    },
+    {
+      "id": "traffic",
+      "parent": "server",
+      "x": 560,
+      "y": 400,
+      "w": 230,
+      "h": 90,
+      "title": "Traffic Simulator",
+      "lines": [
+        "node-cron every 15 minutes",
+        "updates availability for demo realism"
+      ],
+      "fill": "#FFFFFF"
+    },
+    {
+      "id": "prisma",
+      "x": 880,
+      "y": 470,
+      "w": 190,
+      "h": 150,
+      "title": "Prisma ORM",
+      "lines": [
+        "prismaClient.js",
+        "query and persistence layer"
+      ],
+      "fill": "#EAD1DC"
+    },
+    {
+      "id": "db",
+      "x": 1120,
+      "y": 420,
+      "w": 230,
+      "h": 250,
+      "title": "PostgreSQL Database",
+      "lines": [
+        "AppUser",
+        "AppSession",
+        "ParkingSpot",
+        "Reservation",
+        "SearchLog"
+      ],
+      "fill": "#D0E0E3"
+    }
+  ],
+  "edges": [
+    {
+      "from": "client",
+      "to": "router",
+      "label": "HTTP GET for static files\\nREST fetch /api/*"
+    },
+    {
+      "from": "client",
+      "to": "pwa",
+      "label": "install prompt\\nservice worker lifecycle"
+    },
+    {
+      "from": "client",
+      "to": "map",
+      "label": "Leaflet map tiles\\nspot preview and navigate"
+    },
+    {
+      "from": "router",
+      "to": "auth",
+      "label": "/api/auth/*\\n/api/session"
+    },
+    {
+      "from": "router",
+      "to": "parking",
+      "label": "/api/spots\\n/api/recommend\\n/api/stats"
+    },
+    {
+      "from": "router",
+      "to": "booking",
+      "label": "/api/bookings\\n/api/check-in\\n/api/check-out"
+    },
+    {
+      "from": "auth",
+      "to": "prisma",
+      "label": "AppUser / AppSession"
+    },
+    {
+      "from": "parking",
+      "to": "prisma",
+      "label": "ParkingSpot / SearchLog"
+    },
+    {
+      "from": "booking",
+      "to": "prisma",
+      "label": "Reservation + spot updates"
+    },
+    {
+      "from": "traffic",
+      "to": "prisma",
+      "label": "scheduled inventory updates"
+    },
+    {
+      "from": "prisma",
+      "to": "db",
+      "label": "CRUD queries and transactions"
+    }
+  ],
+  "notes": [
+    "Reservation flow: PENDING -> ACTIVE -> COMPLETED",
+    "Auth is session-token based and enforced before protected booking APIs",
+    "Admin views reuse the same backend with role-gated data access"
+  ]
+}
