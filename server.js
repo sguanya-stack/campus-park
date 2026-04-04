@@ -35,6 +35,7 @@ const server = http.createServer(async (req, res) => {
   try {
     const parsedUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
     const pathname = decodeURIComponent(parsedUrl.pathname);
+    console.log(`[REQ] ${req.method} ${pathname}`);
     const origin = req.headers.origin;
 
     if (origin && DEV_ALLOWED_ORIGINS.has(origin)) {
@@ -301,15 +302,263 @@ async function handleApi(req, res, url, pathname) {
     return;
   }
 
-  if (req.method === "GET" && pathname === "/api/analytics/heatmap") {
-    const since = new Date(Date.now() - 12 * 60 * 60 * 1000);
-    const points = await prisma.searchLog.findMany({
-      where: {
-        createdAt: { gte: since }
-      },
-      select: { lat: true, lng: true },
-      orderBy: { createdAt: "desc" }
+  // ── AI En-route Parking Recommendation ────────────────────────────────────
+  if (req.method === "GET" && pathname === "/api/recommend-enroute") {
+    const fromLat = parseFloat(url.searchParams.get("fromLat"));
+    const fromLng = parseFloat(url.searchParams.get("fromLng"));
+    // Destination defaults to Seattle campus centre (Space Needle area)
+    const toLat   = parseFloat(url.searchParams.get("toLat")  || "47.6205");
+    const toLng   = parseFloat(url.searchParams.get("toLng")  || "-122.3493");
+
+    if (!Number.isFinite(fromLat) || !Number.isFinite(fromLng)) {
+      sendJson(res, 400, { error: "fromLat and fromLng are required" });
+      return;
+    }
+
+    // ── Fetch route from OSRM (free, no key) ────────────────────────────────
+    let routeGeoJSON = null;
+    let routeCoords  = [[fromLng, fromLat], [toLng, toLat]]; // straight-line fallback
+    try {
+      const osrmUrl = `http://router.project-osrm.org/route/v1/driving/${fromLng},${fromLat};${toLng},${toLat}?overview=full&geometries=geojson`;
+      const signal  = typeof AbortSignal?.timeout === "function"
+        ? AbortSignal.timeout(6000) : undefined;
+      const osrmRes = await fetch(osrmUrl, { signal });
+      if (osrmRes.ok) {
+        const osrmData = await osrmRes.json();
+        const coords   = osrmData?.routes?.[0]?.geometry?.coordinates;
+        if (Array.isArray(coords) && coords.length > 1) {
+          routeCoords  = coords;
+          routeGeoJSON = { type: "LineString", coordinates: coords };
+        }
+      }
+    } catch (e) {
+      console.error("[AI recommend] OSRM failed:", e.message);
+    }
+
+    // ── Point-to-route distance (meters, geodetically correct) ─────────────
+    function ptSegMeters(lat, lng, aLat, aLng, bLat, bLng) {
+      const dx = bLng - aLng, dy = bLat - aLat;
+      const lenSq = dx * dx + dy * dy;
+      let t = lenSq === 0 ? 0 : ((lng - aLng) * dx + (lat - aLat) * dy) / lenSq;
+      t = Math.max(0, Math.min(1, t));
+      const nearLat = aLat + t * dy;
+      const nearLng = aLng + t * dx;
+      const dLat = (lat - nearLat) * 111320;
+      const dLng = (lng - nearLng) * 111320 * Math.cos(lat * Math.PI / 180);
+      return Math.sqrt(dLat * dLat + dLng * dLng);
+    }
+    function minDistToRoute(lat, lng) {
+      let minD = Infinity;
+      for (let i = 0; i < routeCoords.length - 1; i++) {
+        const [aLng, aLat] = routeCoords[i];
+        const [bLng, bLat] = routeCoords[i + 1];
+        const d = ptSegMeters(lat, lng, aLat, aLng, bLat, bLng);
+        if (d < minD) minD = d;
+      }
+      return minD;
+    }
+
+    // ── Shared helpers (same as heatmap section) ────────────────────────────
+    function spotPopularityEr(name = "") {
+      const n = name.toLowerCase();
+      if (n.includes("amazon") || n.includes("sphere")) return 1.00;
+      if (n.includes("westlake hub"))  return 0.88;
+      if (n.includes("whole foods"))   return 0.82;
+      if (n.includes("mohai"))         return 0.72;
+      if (n.includes("mercer"))        return 0.68;
+      if (n.includes("boren"))         return 0.60;
+      if (n.includes("northeastern"))  return 0.55;
+      if (n.includes("valley"))        return 0.50;
+      if (n.includes("fairview"))      return 0.45;
+      return 0.55;
+    }
+    function hashStrEr(s) {
+      let h = 0;
+      for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+      return Math.abs(h);
+    }
+    function spotLatLngEr(spot, idx) {
+      const seed = hashStrEr(`${spot.id}${spot.name}${spot.address || ""}${idx}`);
+      return [
+        47.615    + ((seed % 1000) / 1000 - 0.5) * 0.010,
+        -122.3384 + (((seed / 1000) % 1000) / 1000 - 0.5) * 0.012
+      ];
+    }
+
+    // ── Time-of-day demand ──────────────────────────────────────────────────
+    const nowEr = new Date();
+    const monthEr = nowEr.getUTCMonth();
+    const isDSTEr = monthEr >= 2 && monthEr <= 10;
+    const localHourEr = (nowEr.getUTCHours() + 24 + (isDSTEr ? -7 : -8)) % 24;
+    const DEMAND_CURVE_ER = [
+      0.04, 0.02, 0.02, 0.02, 0.04, 0.09,
+      0.24, 0.62, 0.93, 0.81, 0.68, 0.76,
+      0.86, 0.74, 0.66, 0.65, 0.82, 0.97,
+      0.70, 0.50, 0.34, 0.22, 0.14, 0.07
+    ];
+    const timeDemandEr = DEMAND_CURVE_ER[localHourEr];
+
+    // ── Fetch and score spots ────────────────────────────────────────────────
+    const allSpotsEr = await prisma.parkingSpot.findMany({
+      where: { status: "active" },
+      orderBy: { name: "asc" }
     });
+
+    const ON_ROUTE_M = 300; // metres — on-route threshold
+
+    const scored = allSpotsEr
+      .map((spot, idx) => {
+        const [lat, lng] = spotLatLngEr(spot, idx);
+        const distM      = Math.round(minDistToRoute(lat, lng));
+        const available  = Number(spot.availableSpots || 0);
+        const pop        = spotPopularityEr(spot.name);
+
+        // proximityScore: 1 if on route, degrades to 0 at 2 km
+        const proxScore  = distM <= ON_ROUTE_M
+          ? 1 - distM / ON_ROUTE_M
+          : Math.max(0, 1 - distM / 2000);
+        const availScore = Math.min(available / 10, 1);
+        const crowdScore = 1 - timeDemandEr * pop; // lower crowd = better
+        const score      = proxScore * 0.5 + availScore * 0.3 + crowdScore * 0.2;
+
+        return { spot, lat, lng, distM, available, onRoute: distM <= ON_ROUTE_M, score };
+      })
+      .filter(s => s.available > 0)
+      .sort((a, b) => b.score - a.score);
+
+    const results = scored.slice(0, 3).map(({ spot, lat, lng, distM, available, onRoute }) => ({
+      ...spot,
+      lat,
+      lng,
+      distM,
+      available,
+      onRoute,
+      isAvailable: true
+    }));
+
+    sendJson(res, 200, {
+      results,
+      route: routeGeoJSON,
+      from: { lat: fromLat, lng: fromLng },
+      to:   { lat: toLat,   lng: toLng }
+    });
+    return;
+  }
+
+  if (req.method === "GET" && pathname === "/api/analytics/heatmap") {
+    // ── Realistic, time-varying heatmap ────────────────────────────────────
+    // Spots have no lat/lng in the DB; we use the same hash formula as the
+    // frontend (app.js getSpotLatLng) so blobs land on top of map pins.
+    //
+    // Demand changes every 10 minutes via a deterministic seed — all clients
+    // in the same window see identical data without any Math.random() drift.
+    //
+    // Rules:
+    //  • Only 3-6 of the ~10 spots are "active" at once (threshold filter)
+    //  • Intensity follows an hourly demand curve (peak 8-9am & 5-6pm PT)
+    //  • Weekends run at ~30% of weekday volume
+    //  • Each active spot gets a Gaussian scatter of points (~85 m radius)
+
+    const allSpots = await prisma.parkingSpot.findMany({
+      where:  { status: "active" },
+      select: { id: true, name: true, address: true },
+      orderBy: { name: "asc" }
+    });
+
+    const now        = new Date();
+    const utcHour    = now.getUTCHours();
+    const month      = now.getUTCMonth();            // 0-11
+    const isDST      = month >= 2 && month <= 10;   // rough DST window
+    const localHour  = (utcHour + 24 + (isDST ? -7 : -8)) % 24;   // Pacific
+    const localDay   = new Date(now.getTime() + (isDST ? -7 : -8) * 3600000).getDay();
+    const tenMinSlot = Math.floor(now.getTime() / (10 * 60 * 1000));
+
+    // Hourly demand multiplier 0→1, Pacific time (index = local hour 0-23)
+    const DEMAND_CURVE = [
+      0.04, 0.02, 0.02, 0.02, 0.04, 0.09,   // 0–5  am  (very quiet)
+      0.24, 0.62, 0.93, 0.81, 0.68, 0.76,   // 6–11 am  (morning peak at 8)
+      0.86, 0.74, 0.66, 0.65, 0.82, 0.97,   // 12–5 pm  (lunch + evening peak at 17)
+      0.70, 0.50, 0.34, 0.22, 0.14, 0.07    // 6–11 pm  (taper off)
+    ];
+    const weekendFactor = (localDay === 0 || localDay === 6) ? 0.30 : 1.00;
+    const globalDemand  = DEMAND_CURVE[localHour] * weekendFactor;
+
+    // How popular each spot is by default (name-matched)
+    function spotPopularity(name = "") {
+      const n = name.toLowerCase();
+      if (n.includes("amazon") || n.includes("sphere")) return 1.00;
+      if (n.includes("westlake hub"))                    return 0.88;
+      if (n.includes("whole foods"))                     return 0.82;
+      if (n.includes("mohai"))                           return 0.72;
+      if (n.includes("mercer"))                          return 0.68;
+      if (n.includes("boren"))                           return 0.60;
+      if (n.includes("northeastern"))                    return 0.55;
+      if (n.includes("valley"))                          return 0.50;
+      if (n.includes("fairview"))                        return 0.45;
+      return 0.55;
+    }
+
+    // Deterministic PRNG — no Math.random(), stable per 10-min slot.
+    // IMPORTANT: JS ^ (XOR) converts both sides to signed 32-bit, so large h
+    // values go negative without the >>> 0 re-cast after every operation.
+    function prng(a, b) {
+      let h = ((Math.imul(a | 0, 1664525) + (b | 0) + 1013904223) | 0) >>> 0;
+      h = (h ^ (h >>> 16)) >>> 0;
+      h = Math.imul(h, 0x45d9f3b) >>> 0;
+      h = (h ^ (h >>> 16)) >>> 0;
+      return h / 4294967296;   // always in [0, 1)
+    }
+
+    // Box-Muller: two uniform [0,1] → one standard normal
+    function gaussian(u1, u2) {
+      return Math.sqrt(-2 * Math.log(Math.max(u1, 1e-10))) * Math.cos(2 * Math.PI * u2);
+    }
+
+    // ── MUST match app.js hashString + getSpotLatLng exactly ──────────────
+    function hashStr(s) {
+      let h = 0;
+      for (let i = 0; i < s.length; i++) {
+        h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+      }
+      return Math.abs(h);
+    }
+    function spotLatLng(spot, idx) {
+      const seed = hashStr(`${spot.id}${spot.name}${spot.address || ""}${idx}`);
+      return [
+        47.615  + ((seed % 1000)          / 1000 - 0.5) * 0.010,
+        -122.3384 + (((seed / 1000) % 1000) / 1000 - 0.5) * 0.012
+      ];
+    }
+    // ──────────────────────────────────────────────────────────────────────
+
+    const points = [];
+    allSpots.forEach((spot, idx) => {
+      const [cLat, cLng] = spotLatLng(spot, idx);
+      const pop = spotPopularity(spot.name);
+
+      // Each 10-min slot gives every spot a random "surge" factor 0.1–1.2
+      // This is what makes only a subset of spots hot at any given time.
+      const surge  = 0.10 + prng(tenMinSlot + idx * 7, idx + 3) * 1.10;
+      const demand = globalDemand * pop * surge;
+
+      if (demand < 0.12) return;  // below threshold → spot is quiet, skip it
+
+      const n     = Math.round(demand * 28);  // up to ~28 points per spot
+      const sigma = 0.00078;                  // ≈85 m Gaussian radius
+
+      for (let i = 0; i < n; i++) {
+        const base = tenMinSlot * 997 + idx * 31 + i;
+        const u1 = prng(base * 2,     13);
+        const u2 = prng(base * 2 + 1, 17);
+        const u3 = prng(base * 2,     19);
+        const u4 = prng(base * 2 + 1, 23);
+        points.push({
+          lat: cLat + gaussian(u1, u2) * sigma,
+          lng: cLng + gaussian(u3, u4) * sigma
+        });
+      }
+    });
+
     sendJson(res, 200, points);
     return;
   }

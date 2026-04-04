@@ -5,9 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CampusPark</title>
     <meta name="google-maps-api-key" content="" />
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+      window.__dbg = [];
+      window.__log = function(msg) { window.__dbg.push(msg); };
+      window.onerror = function(msg, src, line, col, err) {
+        // "Script error." at line 0 is an opaque cross-origin error (CDN script
+        // without CORS headers, or a browser extension). It carries no useful
+        // information, so suppress it to avoid a misleading red banner.
+        if (!msg || msg === 'Script error.') return;
+        var d = document.getElementById('__debug_bar');
+        if (!d) { d = document.createElement('div'); d.id='__debug_bar'; d.style.cssText='position:fixed;top:0;left:0;right:0;z-index:99999;background:#b91c1c;color:white;padding:8px 12px;font:13px monospace;white-space:pre-wrap'; document.body.appendChild(d); }
+        d.textContent = '❌ JS ERROR: ' + msg + ' (line ' + line + (col ? ':' + col : '') + ')';
+      };
+      window.addEventListener('unhandledrejection', function(e) {
+        var d = document.getElementById('__debug_bar');
+        if (!d) { d = document.createElement('div'); d.id='__debug_bar'; d.style.cssText='position:fixed;top:0;left:0;right:0;z-index:99999;background:#b91c1c;color:white;padding:8px 12px;font:13px monospace;white-space:pre-wrap'; document.body.appendChild(d); }
+        d.textContent = '❌ ASYNC ERROR: ' + String(e.reason && e.reason.message ? e.reason.message : e.reason);
+      });
+    </script>
+    <!-- crossorigin="anonymous" is required so the browser sends a CORS request
+         and the real error stack is visible in window.onerror (instead of the
+         opaque "Script error." masking). unpkg.com sends Access-Control-Allow-Origin:*
+         so this will succeed. -->
+    <script src="https://unpkg.com/lucide@latest" crossorigin="anonymous"></script>
     <link rel="stylesheet" href="/node_modules/leaflet/dist/leaflet.css" />
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=4" />
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#0abab5" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
@@ -148,6 +170,29 @@
                 </label>
                 <button id="recommendBtn" class="btn-primary" data-i18n="recommendBtn">Recommend</button>
               </div>
+            </section>
+
+            <!-- ── AI Route-Based Parking Assistant ── -->
+            <section class="ai-assistant-panel">
+              <div class="ai-assistant-header">
+                <div>
+                  <p class="eyebrow">AI Assistant</p>
+                  <h2>Smart Route Parking</h2>
+                  <p class="sub">Enter your starting point and we'll find the best parking spot along your route to campus.</p>
+                </div>
+              </div>
+              <div class="ai-controls">
+                <label class="search-field search-field-wide">
+                  <span>Departure Address</span>
+                  <input id="departureInput" type="text"
+                    placeholder="e.g. Pike Place Market, Seattle"
+                    autocomplete="off" />
+                </label>
+                <button id="aiRecommendBtn" class="btn-primary ai-find-btn" type="button">
+                  Find Parking
+                </button>
+              </div>
+              <div id="aiResultPanel" class="ai-result-panel hidden"></div>
             </section>
 
             <section class="results-section list-results">
@@ -372,15 +417,13 @@
     </dialog>
 
     <script src="/node_modules/leaflet/dist/leaflet.js"></script>
-    <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
-    <script src="app.js"></script>
+    <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js" crossorigin="anonymous"></script>
+    <script src="app.js?v=11"></script>
     <script>
+      // Unregister any existing service workers to prevent stale caching issues
       if ("serviceWorker" in navigator) {
-        window.addEventListener("load", () => {
-          navigator.serviceWorker
-            .register("/service-worker.js")
-            .then((reg) => console.log("Service Worker registered!", reg.scope))
-            .catch((err) => console.error("Service Worker registration failed:", err));
+        navigator.serviceWorker.getRegistrations().then((regs) => {
+          regs.forEach((r) => r.unregister());
         });
       }
     </script>

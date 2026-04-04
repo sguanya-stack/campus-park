@@ -30,6 +30,8 @@ let heatmapLayer = null;
 let heatmapData = [];
 let heatmapVisible = true;
 let heatmapRefreshTimer = null;
+let routePolylineLayer = null;
+let aiRecommendedSpotId = null;
 
 const HEATMAP_GRADIENT = {
   0.0: "rgba(0, 255, 0, 0)",
@@ -99,6 +101,11 @@ const installAppBtn = document.getElementById("installAppBtn");
 const dismissInstallPromptBtn = document.getElementById("dismissInstallPromptBtn");
 const iosInstallHint = document.getElementById("iosInstallHint");
 const dismissIosHintBtn = document.getElementById("dismissIosHintBtn");
+const roleTabStudent   = document.getElementById("roleTabStudent");
+const roleTabAdmin     = document.getElementById("roleTabAdmin");
+const departureInput   = document.getElementById("departureInput");
+const aiRecommendBtn   = document.getElementById("aiRecommendBtn");
+const aiResultPanel    = document.getElementById("aiResultPanel");
 
 const i18n = {
   en: {
@@ -590,9 +597,6 @@ async function init() {
   refreshLucideIcons();
 }
 
-const roleTabStudent = document.getElementById("roleTabStudent");
-const roleTabAdmin   = document.getElementById("roleTabAdmin");
-
 function bindEvents() {
   if (loginRole) {
     loginRole.addEventListener("change", syncLoginRoleUi);
@@ -653,6 +657,14 @@ function bindEvents() {
     renderMapView();
   });
   recommendBtn.addEventListener("click", recommendSpot);
+  if (aiRecommendBtn) {
+    aiRecommendBtn.addEventListener("click", handleAiRecommend);
+  }
+  if (departureInput) {
+    departureInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); handleAiRecommend(); }
+    });
+  }
   mapNavigateBtn.addEventListener("click", handleMapNavigate);
   mapReserveBtn.addEventListener("click", handleMapReserve);
   bookingForm.addEventListener("submit", handleConfirmBooking);
@@ -755,6 +767,17 @@ function syncHeatmapToggleUi() {
 function ensureHeatmapLayer() {
   const L = ensureLeafletMap();
   if (!L || !L.heatLayer || !leafletMap) return null;
+
+  // leaflet.heat's internal _reset() reads map.getSize() synchronously during
+  // addTo(). Leaflet's canvas Renderer also computes pixel bounds at that moment.
+  // If the map container is still zero-sized (first load before layout, map pane
+  // hidden on mobile, or invalidateSize() hasn't fired yet), those bounds are
+  // null and the library throws "Cannot read properties of null (reading
+  // 'getSize')". Guard here: return null until the container has real pixels.
+  // scheduleLeafletMapResize() will call updateHeatmapLayer() once the map is
+  // properly sized, so no data is lost.
+  if (!leafletMapCanvas || leafletMapCanvas.clientWidth === 0) return null;
+
   if (!heatmapLayer) {
     heatmapLayer = L.heatLayer([], {
       radius: 35,
@@ -768,17 +791,44 @@ function ensureHeatmapLayer() {
 }
 
 function updateHeatmapLayer() {
+  // If the map container is zero-sized, evict the heat layer immediately.
+  // A zero-sized container means getSize() returns {x:0}, which _reset() writes
+  // into canvas.width — then simpleheat.draw() calls ctx.getImageData(0,0,0,h)
+  // and throws IndexSizeError "source width is 0" (leaflet-heat line 6:1414).
+  // Removing the layer prevents _reset from firing on it at 0×0 dimensions.
+  // When the user returns to the dashboard, renderLeafletMap() → updateHeatmapLayer()
+  // re-adds the layer once the container has real pixel dimensions again.
+  if (!leafletMapCanvas || leafletMapCanvas.clientWidth === 0) {
+    if (heatmapLayer && leafletMap && leafletMap.hasLayer(heatmapLayer)) {
+      leafletMap.removeLayer(heatmapLayer);
+    }
+    return;
+  }
+
   const layer = ensureHeatmapLayer();
   if (!layer || !leafletMap) return;
-  const points = heatmapData
-    .filter((log) => Number.isFinite(log.lat) && Number.isFinite(log.lng))
-    .map((log) => [log.lat, log.lng, 1]);
-  layer.setLatLngs(points);
+
   if (heatmapVisible) {
+    // Add the layer to the map FIRST if it isn't there yet.
+    // onAdd → _initCanvas initialises layer._heat and sets layer._map, so
+    // the subsequent setLatLngs → redraw() → requestAnimFrame(_redraw) call
+    // fires into a valid map reference.
     if (!leafletMap.hasLayer(layer)) {
       layer.addTo(leafletMap);
     }
+    const points = heatmapData
+      .filter((log) => Number.isFinite(log.lat) && Number.isFinite(log.lng))
+      .map((log) => [log.lat, log.lng, 1]);
+    layer.setLatLngs(points);
   } else if (leafletMap.hasLayer(layer)) {
+    // NEVER call setLatLngs before removeLayer.
+    //
+    // The bug: setLatLngs → redraw() schedules requestAnimFrame(_redraw).
+    // removeLayer → Leaflet immediately sets layer._map = null.
+    // On the next browser paint frame _redraw runs; its very first statement
+    // is `var l = this._map.getSize()` with zero null guard (leaflet.heat
+    // 0.2.0, line 11 col 1949) → "Cannot read properties of null
+    // (reading 'getSize')".
     leafletMap.removeLayer(layer);
   }
 }
@@ -942,7 +992,16 @@ function scheduleLeafletMapResize() {
     clearTimeout(leafletMapResizeTimer);
   }
   leafletMapResizeTimer = window.setTimeout(() => {
+    // Guard: if the map container is still zero-sized (e.g. the dashboard is
+    // hidden because the user navigated to /login), do NOT call invalidateSize().
+    // invalidateSize() fires moveend → layer._reset() → getSize() returns {x:0}
+    // → canvas.width set to 0 → _redraw() → simpleheat.draw() calls
+    // ctx.getImageData(0,0,0,h) → IndexSizeError "source width is 0" (line 6:1414).
+    if (!leafletMapCanvas || leafletMapCanvas.clientWidth === 0) return;
     leafletMap.invalidateSize();
+    // Now that the map has real pixel dimensions, apply the heatmap layer if
+    // it was previously skipped because the container was still zero-sized.
+    updateHeatmapLayer();
   }, 180);
 }
 
@@ -1090,7 +1149,15 @@ function renderSpots() {
     return;
   }
 
-  visibleSpots.forEach((spot) => {
+  // Sort AI-recommended spot to the top
+  const sortedSpots = aiRecommendedSpotId
+    ? [
+        ...visibleSpots.filter((s) => s.id === aiRecommendedSpotId),
+        ...visibleSpots.filter((s) => s.id !== aiRecommendedSpotId)
+      ]
+    : visibleSpots;
+
+  sortedSpots.forEach((spot) => {
     const node = spotCardTemplate.content.cloneNode(true);
     const card = node.querySelector(".spot-card");
     const idEl = node.querySelector(".spot-id");
@@ -1112,10 +1179,13 @@ function renderSpots() {
       : t("fullBtn");
     const isSelected = selectedMapSpotId === spot.id;
 
+    const isAiPick = spot.id === aiRecommendedSpotId;
     card.dataset.spotId = spot.id;
     card.classList.toggle("is-selected", isSelected);
+    card.classList.toggle("is-ai-pick", isAiPick);
 
     idEl.innerHTML = `
+      ${isAiPick ? `<div class="spot-ai-banner">🤖 AI Recommended</div>` : ""}
       <span class="spot-title-wrap">
         ${getLandmarkIconMarkup(spot)}
         <span>${spotTitle}</span>
@@ -1414,6 +1484,7 @@ function renderBookings() {
 }
 
 async function recommendSpot(options = {}) {
+  aiRecommendedSpotId = null; // clear AI pin on regular search
   try {
     const query = new URLSearchParams();
     const zone = zoneFilter.value || "all";
@@ -1465,6 +1536,142 @@ async function recommendSpot(options = {}) {
     }
   }
 }
+
+// ── AI En-route Parking Recommendation ─────────────────────────────────────
+
+async function geocodeAddress(address) {
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`;
+  const res = await fetch(url, {
+    headers: { "User-Agent": "CampusPark/1.0 (campus-parking-app)" }
+  });
+  if (!res.ok) throw new Error("Geocoding request failed. Please try again.");
+  const data = await res.json();
+  if (!data || !data.length) throw new Error(`Could not locate "${address}". Try a more specific address.`);
+  return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), name: data[0].display_name };
+}
+
+function clearRoutePolyline() {
+  if (routePolylineLayer && leafletMap) {
+    try { leafletMap.removeLayer(routePolylineLayer); } catch (_) {}
+    routePolylineLayer = null;
+  }
+}
+
+function renderAiResults(results, fromName) {
+  if (!aiResultPanel) return;
+
+  if (!results || !results.length) {
+    aiResultPanel.innerHTML = `<p class="ai-empty">No available parking spots found along this route.</p>`;
+    aiResultPanel.classList.remove("hidden");
+    return;
+  }
+
+  const best = results[0];
+  const fmtDist = (m) => m < 1000 ? `${m}\u202fm` : `${(m / 1000).toFixed(1)}\u202fkm`;
+  const fmtPrice = (p) => Number.isFinite(Number(p)) ? `$${Number(p).toFixed(2)}/hr` : null;
+  const onRouteBadge = best.onRoute
+    ? `<span class="ai-tag ai-tag-green">On your route</span>`
+    : `<span class="ai-tag ai-tag-amber">${fmtDist(best.distM)} from route</span>`;
+
+  const altRows = results.slice(1).map((s) => `
+    <div class="ai-alt-row">
+      <span class="ai-alt-name">${escapeHtml(s.name || s.id)}</span>
+      <span class="ai-alt-meta">${s.available} spots · ${fmtDist(s.distM)}</span>
+      <button class="ai-alt-select" type="button" onclick="selectAiSpot('${escapeHtml(s.id)}')">Select</button>
+    </div>`).join("");
+
+  aiResultPanel.innerHTML = `
+    <div class="ai-result-card">
+      <div class="ai-result-badge">🤖 AI Recommended</div>
+      <h3 class="ai-result-name">${escapeHtml(best.name || best.id)}</h3>
+      <p class="ai-result-addr">${escapeHtml(best.address || "Address unavailable")}</p>
+      <div class="ai-result-tags">
+        ${onRouteBadge}
+        <span class="ai-tag ai-tag-blue">${best.available} spot${best.available === 1 ? "" : "s"} free</span>
+        <span class="ai-tag">${escapeHtml(best.zone || "Zone N/A")}</span>
+        ${fmtPrice(best.pricePerHour) ? `<span class="ai-tag">${fmtPrice(best.pricePerHour)}</span>` : ""}
+      </div>
+      ${altRows ? `<details class="ai-alts"><summary>${results.length - 1} alternative${results.length > 2 ? "s" : ""}</summary>${altRows}</details>` : ""}
+      <button class="btn-primary ai-reserve-cta" type="button"
+        onclick="selectAiSpot('${escapeHtml(best.id)}')">
+        Reserve This Spot
+      </button>
+    </div>`;
+  aiResultPanel.classList.remove("hidden");
+}
+
+async function handleAiRecommend() {
+  const address = departureInput?.value?.trim();
+  if (!address) {
+    departureInput?.focus();
+    return;
+  }
+
+  if (aiRecommendBtn) {
+    aiRecommendBtn.disabled = true;
+    aiRecommendBtn.textContent = "Finding…";
+  }
+  if (aiResultPanel) aiResultPanel.classList.add("hidden");
+
+  try {
+    // 1. Geocode departure address via Nominatim
+    const from = await geocodeAddress(address);
+
+    // 2. Call AI recommendation endpoint
+    const params = new URLSearchParams({
+      fromLat: from.lat.toFixed(6),
+      fromLng: from.lng.toFixed(6)
+    });
+    const data = await apiFetch(`/api/recommend-enroute?${params}`, { auth: false });
+
+    // 3. Draw route polyline on Leaflet map
+    clearRoutePolyline();
+    const L = window.L;
+    if (L && leafletMap && data.route?.coordinates?.length) {
+      const latlngs = data.route.coordinates.map(([lng, lat]) => [lat, lng]);
+      routePolylineLayer = L.polyline(latlngs, {
+        color: "#0abab5",
+        weight: 5,
+        opacity: 0.85,
+        dashArray: "10, 6"
+      }).addTo(leafletMap);
+      // Zoom map to fit the route
+      try { leafletMap.fitBounds(routePolylineLayer.getBounds(), { padding: [48, 48] }); } catch (_) {}
+    }
+
+    // 4. Render recommendation card
+    renderAiResults(data.results, from.name);
+
+    // 5. Highlight best spot on map, pin to top of list
+    if (data.results?.length) {
+      aiRecommendedSpotId = data.results[0].id;
+      selectedMapSpotId = data.results[0].id;
+      renderSpots();
+      renderMapView();
+      scrollSelectedCardIntoView();
+    }
+  } catch (err) {
+    if (aiResultPanel) {
+      aiResultPanel.innerHTML = `<p class="ai-empty ai-error-msg">⚠️ ${escapeHtml(err.message)}</p>`;
+      aiResultPanel.classList.remove("hidden");
+    }
+  } finally {
+    if (aiRecommendBtn) {
+      aiRecommendBtn.disabled = false;
+      aiRecommendBtn.textContent = "Find Parking";
+    }
+  }
+}
+
+// Called from inline onclick in AI result card HTML
+window.selectAiSpot = function selectAiSpot(spotId) {
+  selectedMapSpotId = spotId;
+  renderSpots();
+  renderMapView();
+  scrollSelectedCardIntoView();
+};
+
+// ── end AI section ──────────────────────────────────────────────────────────
 
 function getVisibleSpots() {
   if (!evOnlyFilter.checked) return spots;
