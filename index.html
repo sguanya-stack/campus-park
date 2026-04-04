@@ -29,6 +29,8 @@
          so this will succeed. -->
     <script src="https://unpkg.com/lucide@latest" crossorigin="anonymous"></script>
     <link rel="stylesheet" href="/node_modules/leaflet/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" crossorigin="anonymous" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" crossorigin="anonymous" />
     <link rel="stylesheet" href="styles.css?v=4" />
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#0abab5" />
@@ -65,6 +67,9 @@
                 <option value="fr">Français</option>
               </select>
             </label>
+            <button id="themeToggleBtn" class="btn-icon" type="button" aria-label="Toggle dark mode" aria-pressed="false" title="Toggle dark mode">
+              <i data-lucide="moon"></i>
+            </button>
             <button id="topLoginBtn" class="btn-primary" type="button" data-route-link="/login" data-i18n="signInBtn">Sign In</button>
             <button id="logoutBtn" class="btn-secondary hidden" data-i18n="signOutBtn">Sign Out</button>
           </div>
@@ -183,14 +188,25 @@
               </div>
               <div class="ai-controls">
                 <label class="search-field search-field-wide">
-                  <span>Departure Address</span>
-                  <input id="departureInput" type="text"
-                    placeholder="e.g. Pike Place Market, Seattle"
-                    autocomplete="off" />
+                  <span>Departure Address or ZIP Code</span>
+                  <div class="autocomplete-wrap">
+                    <input id="departureInput" type="text"
+                      placeholder="e.g. Pike Place Market or 98006"
+                      autocomplete="off" inputmode="text" />
+                    <div id="addressSuggestions" class="autocomplete-dropdown" hidden></div>
+                  </div>
                 </label>
                 <button id="aiRecommendBtn" class="btn-primary ai-find-btn" type="button">
                   Find Parking
                 </button>
+              </div>
+              <div class="zip-chips" id="zipChips">
+                <span class="zip-chip-label">Nearby ZIPs:</span>
+                <button class="zip-chip" type="button" data-zip="98101">98101 Downtown</button>
+                <button class="zip-chip" type="button" data-zip="98109">98109 Queen Anne</button>
+                <button class="zip-chip" type="button" data-zip="98006">98006 Bellevue</button>
+                <button class="zip-chip" type="button" data-zip="98034">98034 Kirkland</button>
+                <button class="zip-chip" type="button" data-zip="98052">98052 Redmond</button>
               </div>
               <div id="aiResultPanel" class="ai-result-panel hidden"></div>
             </section>
@@ -292,7 +308,81 @@
               <p>Today's Reservations</p>
               <strong id="adminTodayBookingCount">0</strong>
             </article>
+            <article class="admin-stat card">
+              <p>Today's Revenue</p>
+              <strong id="adminTodayRevenue">$0</strong>
+            </article>
           </section>
+
+          <section class="admin-charts card">
+            <div class="section-heading">
+              <div>
+                <h2>Session &amp; Retention Metrics</h2>
+                <p>Active users and engagement over rolling time windows.</p>
+              </div>
+            </div>
+            <div class="admin-stats-grid" id="adminMetricsGrid" style="margin: 0 0 18px;">
+              <article class="admin-stat card"><p>DAU (today)</p><strong id="metricDau">—</strong></article>
+              <article class="admin-stat card"><p>WAU (7 days)</p><strong id="metricWau">—</strong></article>
+              <article class="admin-stat card"><p>MAU (30 days)</p><strong id="metricMau">—</strong></article>
+              <article class="admin-stat card"><p>7-day Retention</p><strong id="metricRetention">—</strong></article>
+              <article class="admin-stat card"><p>New Users Today</p><strong id="metricNewToday">—</strong></article>
+              <article class="admin-stat card"><p>New Users (7d)</p><strong id="metricNewWeek">—</strong></article>
+              <article class="admin-stat card"><p>Total Users</p><strong id="metricTotal">—</strong></article>
+              <article class="admin-stat card"><p>Bookings (30d)</p><strong id="metricBookings30">—</strong></article>
+            </div>
+            <div class="admin-chart-wrap">
+              <p class="chart-label">Daily Bookings — Last 7 Days</p>
+              <canvas id="chartDauTrend" height="120"></canvas>
+            </div>
+          </section>
+
+          <section class="admin-charts card">
+            <div class="section-heading">
+              <div>
+                <h2>Revenue Analytics</h2>
+                <p>Hourly bookings and earnings over the last 24 hours.</p>
+              </div>
+            </div>
+            <div class="admin-chart-grid">
+              <div class="admin-chart-wrap">
+                <p class="chart-label">Bookings per Hour (24h)</p>
+                <canvas id="chartHourlyBookings" height="200"></canvas>
+              </div>
+              <div class="admin-chart-wrap">
+                <p class="chart-label">Revenue by Zone</p>
+                <canvas id="chartZoneRevenue" height="200"></canvas>
+              </div>
+              <div class="admin-chart-wrap" style="grid-column: 1 / -1;">
+                <p class="chart-label">User Funnel — Last 7 Days (search → spot view → reserve → complete → check-in → check-out)</p>
+                <canvas id="chartFunnel" height="120"></canvas>
+              </div>
+            </div>
+          </section>
+
+          <section class="admin-content card">
+            <div class="section-heading">
+              <div>
+                <h2>Feature Flags</h2>
+                <p>Toggle features on/off without redeploying. Changes take effect within 30 seconds for all clients.</p>
+              </div>
+            </div>
+            <div id="adminFlagList" class="flag-list"></div>
+          </section>
+
+          <section class="admin-content card">
+            <div class="section-heading">
+              <div>
+                <h2>All Reservations</h2>
+                <p>Export the full bookings ledger for reporting or compliance review.</p>
+              </div>
+            </div>
+            <div class="admin-export-row">
+              <button id="exportBookingsBtn" class="btn-secondary" type="button">Download CSV</button>
+              <span class="muted-text" id="exportHint" style="font-size:13px;color:var(--muted);">Exports all reservations with user, spot, and payment data.</span>
+            </div>
+          </section>
+
           <section class="admin-content card">
             <div class="section-heading">
               <div>
@@ -328,6 +418,51 @@
         <button id="dismissIosHintBtn" class="btn-secondary" type="button">Got It</button>
       </div>
     </div>
+
+    <!-- ── Onboarding guide — shown once to first-time users ────────────────── -->
+    <dialog id="onboardingDialog" class="dialog onboarding-dialog" aria-label="Welcome to CampusPark">
+      <div class="onboarding-inner">
+        <div class="onboarding-slides">
+          <div class="onboarding-slide active" data-slide="0">
+            <div class="onboarding-icon" aria-hidden="true">🅿️</div>
+            <h2>Welcome to CampusPark</h2>
+            <p>Find and reserve campus parking in seconds — real-time availability, smart recommendations, and instant check-in.</p>
+          </div>
+          <div class="onboarding-slide" data-slide="1">
+            <div class="onboarding-icon" aria-hidden="true">🗺️</div>
+            <h2>Live Map &amp; Heatmap</h2>
+            <p>See all lots on an interactive map. The heatmap shows demand intensity — green is open, red is packed. Tap any marker to get directions.</p>
+          </div>
+          <div class="onboarding-slide" data-slide="2">
+            <div class="onboarding-icon" aria-hidden="true">🤖</div>
+            <h2>AI Recommendations</h2>
+            <p>Use the <strong>Recommend</strong> button to get a spot suggestion tailored to your arrival time, zone, and driving route.</p>
+          </div>
+          <div class="onboarding-slide" data-slide="3">
+            <div class="onboarding-icon" aria-hidden="true">⏱️</div>
+            <h2>Reserve &amp; Check In</h2>
+            <p>Reserve any open spot. You have <strong>5 minutes</strong> to check in with your 6-digit ticket code before the reservation expires.</p>
+          </div>
+          <div class="onboarding-slide" data-slide="4">
+            <div class="onboarding-icon" aria-hidden="true">📲</div>
+            <h2>Real-Time Updates</h2>
+            <p>Availability refreshes automatically via a live stream — no need to reload. Surge pricing kicks in when a lot is nearly full.</p>
+          </div>
+        </div>
+        <div class="onboarding-dots">
+          <span class="onboarding-dot active" data-dot="0"></span>
+          <span class="onboarding-dot" data-dot="1"></span>
+          <span class="onboarding-dot" data-dot="2"></span>
+          <span class="onboarding-dot" data-dot="3"></span>
+          <span class="onboarding-dot" data-dot="4"></span>
+        </div>
+        <div class="onboarding-actions">
+          <button id="onboardingPrev" class="btn-secondary" type="button" hidden>Back</button>
+          <button id="onboardingNext" class="btn-primary" type="button">Next</button>
+          <button id="onboardingSkip" class="btn-ghost" type="button">Skip</button>
+        </div>
+      </div>
+    </dialog>
 
     <dialog id="bookingDialog" class="dialog">
       <form method="dialog" id="bookingForm">
@@ -367,6 +502,7 @@
           <span class="spot-metric spot-metric-availability"></span>
           <span class="spot-metric spot-metric-price"></span>
           <span class="spot-metric spot-ev hidden"></span>
+          <span class="spot-metric spot-metric-rating hidden"></span>
         </div>
         <p class="spot-status"></p>
         <button class="book-btn btn-primary" data-i18n="reserveBtn">Reserve</button>
@@ -379,8 +515,10 @@
           <strong class="booking-spot"></strong>
           <p class="booking-status"></p>
           <p class="booking-time"></p>
+          <div class="booking-countdown hidden"></div>
           <p class="booking-plate"></p>
           <p class="booking-ticket hidden"></p>
+          <canvas class="booking-qr hidden" width="100" height="100" aria-label="Ticket QR code"></canvas>
           <p class="booking-settlement hidden"></p>
           <p class="booking-owner"></p>
         </div>
@@ -388,6 +526,16 @@
           <button class="checkin-btn btn-primary hidden" type="button">Check-In / Scan Ticket</button>
           <button class="checkout-btn btn-primary hidden" type="button">Check Out / Settle</button>
           <button class="cancel-btn btn-secondary" type="button" data-i18n="cancelReservationBtn">Cancel Reservation</button>
+          <div class="booking-rating hidden">
+            <p class="rating-prompt">Rate this parking lot:</p>
+            <div class="star-picker" role="group" aria-label="Rating">
+              <button class="star-btn" data-star="1" type="button" aria-label="1 star">★</button>
+              <button class="star-btn" data-star="2" type="button" aria-label="2 stars">★</button>
+              <button class="star-btn" data-star="3" type="button" aria-label="3 stars">★</button>
+              <button class="star-btn" data-star="4" type="button" aria-label="4 stars">★</button>
+              <button class="star-btn" data-star="5" type="button" aria-label="5 stars">★</button>
+            </div>
+          </div>
         </div>
       </article>
     </template>
@@ -418,7 +566,10 @@
 
     <script src="/node_modules/leaflet/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js" crossorigin="anonymous"></script>
-    <script src="app.js?v=11"></script>
+    <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1/build/qrcode.min.js" crossorigin="anonymous"></script>
+    <script src="app.js?v=15"></script>
     <script>
       // Unregister any existing service workers to prevent stale caching issues
       if ("serviceWorker" in navigator) {

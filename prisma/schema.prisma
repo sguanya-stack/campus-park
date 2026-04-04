@@ -62,6 +62,7 @@ model ParkingSpot {
   updatedAt           DateTime      @updatedAt
 
   reservations        Reservation[]
+  ratings             SpotRating[]
 
   @@index([zone])
   @@index([status])
@@ -101,5 +102,43 @@ model SearchLog {
   lng       Float
   createdAt DateTime @default(now())
 
+  @@index([createdAt])
+}
+
+model SpotRating {
+  id            String      @id @default(cuid())
+  spotId        String
+  userId        String
+  reservationId String      @unique
+  stars         Int         // 1-5
+  createdAt     DateTime    @default(now())
+
+  spot          ParkingSpot @relation(fields: [spotId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, spotId])
+  @@index([spotId])
+}
+
+// Feature flags — admin-toggleable feature switches
+model FeatureFlag {
+  key         String   @id       // e.g. "surge_pricing", "demand_prediction"
+  enabled     Boolean  @default(false)
+  description String?
+  updatedAt   DateTime @updatedAt
+}
+
+// Funnel analytics — lightweight event store for conversion tracking
+// Events: search | spot_view | reserve_start | reserve_complete | check_in | check_out
+model FunnelEvent {
+  id        String   @id @default(cuid())
+  sessionId String   // anonymous browser session UUID (not auth token)
+  userId    String?  // set when user is authenticated
+  event     String   // funnel step name
+  spotId    String?  // optional spot context
+  meta      Json?    // arbitrary extra data (search query, duration, etc.)
+  createdAt DateTime @default(now())
+
+  @@index([event])
+  @@index([sessionId])
   @@index([createdAt])
 }

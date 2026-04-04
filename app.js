@@ -1,5 +1,37 @@
 const TOKEN_KEY = "campus_parking_auth_token_v1";
 const LANG_KEY = "preferredLang";
+const THEME_KEY = "cp_theme";
+
+// ── Dark mode ─────────────────────────────────────────────────────────────────
+function initTheme() {
+  const saved = localStorage.getItem(THEME_KEY);
+  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const dark = saved ? saved === "dark" : prefersDark;
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  updateThemeIcon(dark);
+}
+
+function updateThemeIcon(dark) {
+  const btn = document.getElementById("themeToggleBtn");
+  if (!btn) return;
+  btn.setAttribute("aria-pressed", String(dark));
+  btn.setAttribute("aria-label", dark ? "Switch to light mode" : "Switch to dark mode");
+  btn.innerHTML = dark
+    ? '<i data-lucide="sun"></i>'
+    : '<i data-lucide="moon"></i>';
+  refreshLucideIcons();
+}
+
+function toggleTheme() {
+  const isDark = document.documentElement.dataset.theme === "dark";
+  const next = isDark ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem(THEME_KEY, next);
+  updateThemeIcon(next === "dark");
+}
+
+// Apply theme before first paint
+initTheme();
 const API_BASE =
   window.CAMPUSPARK_API_BASE ||
   (["localhost", "127.0.0.1"].includes(window.location.hostname)
@@ -7,6 +39,64 @@ const API_BASE =
     : window.location.protocol === "file:"
       ? "http://localhost:3000"
       : "");
+
+// ── Feature flags ─────────────────────────────────────────────────────────────
+// Loaded once on init from /api/flags; cached in memory.
+let featureFlags = {};
+
+async function loadFeatureFlags() {
+  try {
+    featureFlags = await apiFetch("/api/flags", { auth: false });
+  } catch { /* non-critical, default to empty (all off) */ }
+}
+
+function featureEnabled(key) {
+  return featureFlags[key] === true;
+}
+
+// ── Funnel analytics — client-side event batching ────────────────────────────
+// Tracks: search | spot_view | reserve_start | reserve_complete | check_in | check_out
+// Events are batched every 10 seconds to avoid per-action network overhead.
+const FUNNEL_SESSION_KEY = "cp_session_id";
+const funnelSessionId = (() => {
+  let id = sessionStorage.getItem(FUNNEL_SESSION_KEY);
+  if (!id) {
+    id = (typeof crypto !== "undefined" && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    sessionStorage.setItem(FUNNEL_SESSION_KEY, id);
+  }
+  return id;
+})();
+
+let funnelQueue = [];
+let funnelFlushTimer = null;
+
+function trackEvent(event, spotId = null, meta = null) {
+  funnelQueue.push({ sessionId: funnelSessionId, event, spotId, meta });
+  if (!funnelFlushTimer) {
+    funnelFlushTimer = setTimeout(flushFunnelEvents, 10_000);
+  }
+}
+
+async function flushFunnelEvents() {
+  funnelFlushTimer = null;
+  if (funnelQueue.length === 0) return;
+  const batch = funnelQueue.splice(0);
+  try {
+    await fetch(`${API_BASE}/api/analytics/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(batch),
+      keepalive: true
+    });
+  } catch { /* non-critical, silently drop */ }
+}
+
+// Flush before page unload so events aren't lost on navigation
+window.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") flushFunnelEvents();
+});
 
 let currentUser = null;
 let authToken = localStorage.getItem(TOKEN_KEY) || "";
@@ -32,13 +122,41 @@ let heatmapVisible = true;
 let heatmapRefreshTimer = null;
 let routePolylineLayer = null;
 let aiRecommendedSpotId = null;
+let autocompleteDebounceTimer = null;
 
+// Seattle hourly demand curve (matches server.js HOURLY_DEMAND)
+const HOURLY_DEMAND = [
+  0.05, 0.03, 0.03, 0.03, 0.06, 0.12,
+  0.30, 0.66, 0.88, 0.78, 0.64, 0.72,
+  0.82, 0.70, 0.60, 0.62, 0.85, 0.92,
+  0.66, 0.46, 0.30, 0.18, 0.12, 0.07
+];
+
+// Same deterministic bias as server.js spotOccupancyBias
+function spotBias(name = "") {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = ((h << 5) - h + name.charCodeAt(i)) | 0;
+  return 0.75 + (Math.abs(h) % 1000) / 2000;
+}
+
+function predictSpotsInOneHour(spot) {
+  const total = Number(spot.totalSpots || 1);
+  const now = new Date();
+  const isDST = now.getUTCMonth() >= 2 && now.getUTCMonth() <= 10;
+  const currentHour = (now.getUTCHours() + 24 + (isDST ? -7 : -8)) % 24;
+  const futureHour = (currentHour + 1) % 24;
+  const futureDemand = HOURLY_DEMAND[futureHour] ?? 0.5;
+  const futureOccupancy = Math.min(0.99, futureDemand * spotBias(spot.name));
+  return Math.max(0, Math.round(total * (1 - futureOccupancy)));
+}
+
+// Gradient key = occupancy rate: 0 = empty (green) → 1 = full (red)
 const HEATMAP_GRADIENT = {
-  0.0: "rgba(0, 255, 0, 0)",
-  0.4: "rgba(0, 255, 0, 0.6)",
-  0.6: "rgba(255, 255, 0, 0.75)",
-  0.8: "rgba(255, 140, 0, 0.85)",
-  1.0: "rgba(255, 0, 0, 0.95)"
+  0.0: "#00c853",
+  0.3: "#76ff03",
+  0.55: "#ffea00",
+  0.75: "#ff6d00",
+  1.0: "#d50000"
 };
 
 const zoneFilter = document.getElementById("zoneFilter");
@@ -49,6 +167,8 @@ const duration = document.getElementById("duration");
 const evOnlyFilter = document.getElementById("evOnlyFilter");
 const recommendBtn = document.getElementById("recommendBtn");
 const spotGrid = document.getElementById("spotGrid");
+
+
 const bookingList = document.getElementById("bookingList");
 const mapGrid = document.querySelector("#map-view .map-grid");
 const leafletMapCanvas = document.getElementById("leafletMapCanvas");
@@ -96,6 +216,7 @@ const adminTotalCount = document.getElementById("adminTotalCount");
 const adminAvailableCount = document.getElementById("adminAvailableCount");
 const adminTodayBookingCount = document.getElementById("adminTodayBookingCount");
 const adminSpotList = document.getElementById("adminSpotList");
+const adminFlagList = document.getElementById("adminFlagList");
 const installPrompt = document.getElementById("installPrompt");
 const installAppBtn = document.getElementById("installAppBtn");
 const dismissInstallPromptBtn = document.getElementById("dismissInstallPromptBtn");
@@ -575,6 +696,8 @@ async function init() {
   setupInstallExperience();
   initI18n();
   syncLoginRoleUi();
+  // Load feature flags early so all rendering can gate on them
+  await loadFeatureFlags();
   await restoreSession();
   // Try loading data; if it fails on cold start, retry once after a short delay
   try {
@@ -594,7 +717,57 @@ async function init() {
   }
   syncSessionUi();
   setupHeatmap();
+  initSpotStream();
   refreshLucideIcons();
+  maybeShowOnboarding();
+}
+
+// ── Onboarding guide ──────────────────────────────────────────────────────────
+const ONBOARDING_KEY = "cp_onboarded_v1";
+
+function maybeShowOnboarding() {
+  if (localStorage.getItem(ONBOARDING_KEY)) return;
+  const dialog = document.getElementById("onboardingDialog");
+  if (!dialog) return;
+  dialog.showModal();
+  setupOnboarding(dialog);
+}
+
+function setupOnboarding(dialog) {
+  const slides = dialog.querySelectorAll(".onboarding-slide");
+  const dots   = dialog.querySelectorAll(".onboarding-dot");
+  const prev   = dialog.querySelector("#onboardingPrev");
+  const next   = dialog.querySelector("#onboardingNext");
+  const skip   = dialog.querySelector("#onboardingSkip");
+  let current  = 0;
+  const total  = slides.length;
+
+  function goTo(idx) {
+    slides[current].classList.remove("active");
+    dots[current].classList.remove("active");
+    current = Math.max(0, Math.min(total - 1, idx));
+    slides[current].classList.add("active");
+    dots[current].classList.add("active");
+    prev.hidden   = current === 0;
+    next.textContent = current === total - 1 ? "Get Started" : "Next";
+  }
+
+  prev.addEventListener("click", () => goTo(current - 1));
+  next.addEventListener("click", () => {
+    if (current < total - 1) { goTo(current + 1); }
+    else { finishOnboarding(dialog); }
+  });
+  skip.addEventListener("click", () => finishOnboarding(dialog));
+  dots.forEach(dot => dot.addEventListener("click", () => goTo(Number(dot.dataset.dot))));
+  // Allow closing by clicking backdrop
+  dialog.addEventListener("click", e => {
+    if (e.target === dialog) finishOnboarding(dialog);
+  });
+}
+
+function finishOnboarding(dialog) {
+  localStorage.setItem(ONBOARDING_KEY, "1");
+  dialog.close();
 }
 
 function bindEvents() {
@@ -662,9 +835,54 @@ function bindEvents() {
   }
   if (departureInput) {
     departureInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") { e.preventDefault(); handleAiRecommend(); }
+      if (e.key === "Enter") { e.preventDefault(); hideAddressSuggestions(); handleAiRecommend(); }
+      if (e.key === "Escape") { hideAddressSuggestions(); }
+      if (e.key === "ArrowDown") {
+        const first = document.querySelector(".autocomplete-item");
+        if (first) { e.preventDefault(); first.focus(); }
+      }
+    });
+    departureInput.addEventListener("input", () => {
+      clearTimeout(autocompleteDebounceTimer);
+      const val = departureInput.value.trim();
+      if (val.length < 3 || /^\d{5}(-\d{4})?$/.test(val)) { hideAddressSuggestions(); return; }
+      autocompleteDebounceTimer = setTimeout(() => fetchAndShowSuggestions(val), 320);
+    });
+    departureInput.addEventListener("blur", () => {
+      setTimeout(hideAddressSuggestions, 180);
     });
   }
+  // ZIP quick-fill chips — clicking fills the input and auto-submits
+  document.querySelectorAll(".zip-chip").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (departureInput) {
+        departureInput.value = btn.dataset.zip;
+        departureInput.focus();
+      }
+      hideAddressSuggestions();
+      handleAiRecommend();
+    });
+  });
+  // Admin CSV export
+  document.getElementById("exportBookingsBtn")?.addEventListener("click", () => {
+    const token = authToken;
+    const url = `${API_BASE}/api/admin/bookings/export`;
+    const a = document.createElement("a");
+    a.href = token ? `${url}?_t=${encodeURIComponent(token)}` : url;
+    a.download = "";
+    // Use fetch with auth header so the token is sent properly
+    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.blob() : Promise.reject())
+      .then(blob => {
+        const burl = URL.createObjectURL(blob);
+        const a2 = document.createElement("a");
+        a2.href = burl;
+        a2.download = `campuspark-bookings-${new Date().toISOString().slice(0, 10)}.csv`;
+        a2.click();
+        URL.revokeObjectURL(burl);
+      })
+      .catch(() => alert("Export failed — ensure you are signed in as admin."));
+  });
   mapNavigateBtn.addEventListener("click", handleMapNavigate);
   mapReserveBtn.addEventListener("click", handleMapReserve);
   bookingForm.addEventListener("submit", handleConfirmBooking);
@@ -684,6 +902,7 @@ function bindEvents() {
   loginBtn.addEventListener("click", handleLogin);
   registerBtn.addEventListener("click", handleRegister);
   logoutBtn.addEventListener("click", handleLogout);
+  document.getElementById("themeToggleBtn")?.addEventListener("click", toggleTheme);
   installAppBtn.addEventListener("click", handleInstallApp);
   dismissInstallPromptBtn.addEventListener("click", dismissInstallUi);
   dismissIosHintBtn.addEventListener("click", dismissInstallUi);
@@ -753,6 +972,7 @@ async function refreshSpots() {
   const query = new URLSearchParams({ at, zone });
   if (search) {
     query.set("search", search);
+    trackEvent("search", null, { query: search, zone });
   }
   const result = await apiFetch(`/api/spots?${query.toString()}`, { auth: false });
   spots = result.spots || [];
@@ -816,9 +1036,18 @@ function updateHeatmapLayer() {
     if (!leafletMap.hasLayer(layer)) {
       layer.addTo(leafletMap);
     }
-    const points = heatmapData
-      .filter((log) => Number.isFinite(log.lat) && Number.isFinite(log.lng))
-      .map((log) => [log.lat, log.lng, 1]);
+    // Build points from real-time spot availability.
+    // intensity = occupancy rate (0 = all free/green, 1 = full/red).
+    const points = spots
+      .map((spot, idx) => {
+        const [lat, lng] = getSpotLatLng(spot, idx);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        const total = spot.totalSpots || spot.total_spots || 1;
+        const avail = spot.availableSpots ?? spot.available_spots ?? total;
+        const occupancy = Math.min(1, Math.max(0, 1 - avail / total));
+        return [lat, lng, occupancy];
+      })
+      .filter(Boolean);
     layer.setLatLngs(points);
   } else if (leafletMap.hasLayer(layer)) {
     // NEVER call setLatLngs before removeLayer.
@@ -845,21 +1074,48 @@ async function fetchHeatmapData() {
 
 function setupHeatmap() {
   if (!heatmapToggle) return;
-  if (!window.L || !window.L.heatLayer) {
+  if (!featureEnabled("heatmap") || !window.L || !window.L.heatLayer) {
     heatmapToggle.classList.add("hidden");
     return;
   }
   syncHeatmapToggleUi();
-  fetchHeatmapData();
-  if (heatmapRefreshTimer) {
-    clearInterval(heatmapRefreshTimer);
+  updateHeatmapLayer();
+}
+
+// ── Server-Sent Events: real-time spot availability ──────────────────────────
+let spotEventSource = null;
+function initSpotStream() {
+  if (spotEventSource) {
+    spotEventSource.close();
   }
-  heatmapRefreshTimer = window.setInterval(fetchHeatmapData, 60 * 1000);
-  window.addEventListener("beforeunload", () => {
-    if (heatmapRefreshTimer) {
-      clearInterval(heatmapRefreshTimer);
-    }
-  });
+  const es = new EventSource("/api/spots/stream");
+  spotEventSource = es;
+
+  es.onmessage = (evt) => {
+    try {
+      const updates = JSON.parse(evt.data);
+      if (!Array.isArray(updates)) return;
+      // Merge incoming availability into the local spots array
+      const byId = new Map(updates.map(u => [u.id, u]));
+      spots = spots.map(s => {
+        const u = byId.get(s.id);
+        if (!u) return s;
+        return { ...s, availableSpots: u.availableSpots, totalSpots: u.totalSpots, pricePerHour: u.pricePerHour };
+      });
+      renderSpots();
+      renderMapView();
+      updateHeatmapLayer();
+    } catch { /* ignore parse errors */ }
+  };
+
+  es.onerror = () => {
+    // Reconnect after 15 s on error (browser auto-reconnects, but add backoff)
+    es.close();
+    spotEventSource = null;
+    setTimeout(initSpotStream, 15000);
+  };
+
+  window.addEventListener("beforeunload", () => es.close());
 }
 
 async function refreshMyBookings() {
@@ -978,7 +1234,15 @@ function ensureLeafletMap() {
       maxZoom: 19,
       attribution: "&copy; OpenStreetMap contributors"
     }).addTo(leafletMap);
-    leafletLayerGroup = window.L.layerGroup().addTo(leafletMap);
+    // Use marker clustering if available, fall back to plain layerGroup
+    leafletLayerGroup = window.L.markerClusterGroup
+      ? window.L.markerClusterGroup({
+          maxClusterRadius: 60,
+          showCoverageOnHover: false,
+          spiderfyOnMaxZoom: true,
+          disableClusteringAtZoom: 17
+        }).addTo(leafletMap)
+      : window.L.layerGroup().addTo(leafletMap);
     leafletMap.setView([47.615, -122.3384], 15);
     scheduleLeafletMapResize();
   }
@@ -1011,6 +1275,31 @@ function hashString(value) {
     hash = ((hash << 5) - hash + value.charCodeAt(i)) | 0;
   }
   return Math.abs(hash);
+}
+
+// Dynamic surge pricing based on real-time occupancy
+function getSurgeFactor(spot) {
+  const total = Number(spot.totalSpots || 1);
+  const avail = Number(spot.availableSpots ?? total);
+  const occ = 1 - avail / Math.max(total, 1);
+  if (occ >= 0.92) return { factor: 2.0, label: "🔥 2× surge" };
+  if (occ >= 0.82) return { factor: 1.5, label: "⚡ 1.5×" };
+  if (occ >= 0.65) return { factor: 1.2, label: "↑ 1.2×" };
+  return { factor: 1.0, label: null };
+}
+
+function getSurgePrice(spot) {
+  const base = Number(spot.pricePerHour);
+  if (!Number.isFinite(base)) return { display: "N/A", surgeLabel: null };
+  const { factor, label } = getSurgeFactor(spot);
+  const price = +(base * factor).toFixed(2);
+  return {
+    display: `$${price.toFixed(2)}/hr`,
+    base: `$${base.toFixed(2)}/hr`,
+    surgeLabel: label,
+    isSurge: factor > 1.0,
+    price
+  };
 }
 
 function getSpotLatLng(spot, index) {
@@ -1103,12 +1392,40 @@ function render() {
   renderAdminView();
 }
 
+const adminTodayRevenue = document.getElementById("adminTodayRevenue");
+let _chartHourly   = null;
+let _chartZone     = null;
+let _chartFunnel   = null;
+let _chartDauTrend = null;
+
 function renderAdminView() {
   if (!adminView) return;
 
   adminTotalCount.textContent = String(adminStats.total || 0);
   adminAvailableCount.textContent = String(adminStats.available || 0);
   adminTodayBookingCount.textContent = String(adminStats.todayBookings || 0);
+
+  // Fetch and render revenue charts (admin only)
+  if (currentUser?.role === "admin") {
+    apiFetch("/api/admin/analytics").then(data => {
+      if (adminTodayRevenue) {
+        adminTodayRevenue.textContent = `$${Number(data.todayRevenue || 0).toFixed(2)}`;
+      }
+      renderAdminCharts(data);
+    }).catch(() => {});
+
+    apiFetch("/api/analytics/funnel").then(data => {
+      renderFunnelChart(data.funnel);
+    }).catch(() => {});
+
+    apiFetch("/api/admin/flags").then(flags => {
+      renderAdminFlags(flags);
+    }).catch(() => {});
+
+    apiFetch("/api/admin/metrics").then(m => {
+      renderSessionMetrics(m);
+    }).catch(() => {});
+  }
 
   adminSpotList.innerHTML = "";
 
@@ -1136,16 +1453,266 @@ function renderAdminView() {
   });
 }
 
+function renderAdminCharts(data) {
+  if (!window.Chart) return;
+
+  const accent = "#0abab5";
+  const ai = "#7c6ff7";
+  const chartDefaults = {
+    responsive: true,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { grid: { color: "rgba(0,0,0,0.04)" }, ticks: { font: { size: 10 } } },
+      y: { grid: { color: "rgba(0,0,0,0.06)" }, ticks: { font: { size: 10 } }, beginAtZero: true }
+    }
+  };
+
+  const hourlyCanvas = document.getElementById("chartHourlyBookings");
+  if (hourlyCanvas && data.hourlyBookings) {
+    if (_chartHourly) _chartHourly.destroy();
+    _chartHourly = new window.Chart(hourlyCanvas, {
+      type: "bar",
+      data: {
+        labels: data.hourlyBookings.labels,
+        datasets: [{
+          label: "Bookings",
+          data: data.hourlyBookings.data,
+          backgroundColor: accent + "99",
+          borderColor: accent,
+          borderWidth: 1,
+          borderRadius: 4
+        }]
+      },
+      options: chartDefaults
+    });
+  }
+
+  const zoneCanvas = document.getElementById("chartZoneRevenue");
+  if (zoneCanvas && data.zoneRevenue?.labels?.length) {
+    if (_chartZone) _chartZone.destroy();
+    const colors = [accent, ai, "#f59e0b", "#10b981", "#ef4444", "#3b82f6"];
+    _chartZone = new window.Chart(zoneCanvas, {
+      type: "bar",
+      data: {
+        labels: data.zoneRevenue.labels,
+        datasets: [{
+          label: "Revenue ($)",
+          data: data.zoneRevenue.data,
+          backgroundColor: data.zoneRevenue.labels.map((_, i) => colors[i % colors.length] + "cc"),
+          borderColor: data.zoneRevenue.labels.map((_, i) => colors[i % colors.length]),
+          borderWidth: 1,
+          borderRadius: 4
+        }]
+      },
+      options: {
+        ...chartDefaults,
+        plugins: { ...chartDefaults.plugins, tooltip: {
+          callbacks: { label: ctx => `$${ctx.parsed.y.toFixed(2)}` }
+        }}
+      }
+    });
+  }
+}
+
+function renderFunnelChart(funnel) {
+  if (!window.Chart || !funnel?.length) return;
+  const canvas = document.getElementById("chartFunnel");
+  if (!canvas) return;
+  if (_chartFunnel) _chartFunnel.destroy();
+  const labels = funnel.map(f => f.step.replace("_", " "));
+  const counts = funnel.map(f => f.count);
+  const convRate = funnel.map(f => Math.round(f.conversionFromPrev * 100));
+  _chartFunnel = new window.Chart(canvas, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        label: "Events",
+        data: counts,
+        backgroundColor: "#0abab599",
+        borderColor: "#0abab5",
+        borderWidth: 1,
+        borderRadius: 4,
+        yAxisID: "yCount"
+      }, {
+        label: "Conv %",
+        data: convRate,
+        type: "line",
+        borderColor: "#7c6ff7",
+        backgroundColor: "#7c6ff720",
+        pointRadius: 4,
+        tension: 0.3,
+        yAxisID: "yPct"
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: true, position: "top" } },
+      scales: {
+        yCount: { position: "left", beginAtZero: true, ticks: { font: { size: 10 } }, title: { display: true, text: "Events" } },
+        yPct:   { position: "right", min: 0, max: 100, ticks: { font: { size: 10 }, callback: v => `${v}%` }, grid: { drawOnChartArea: false }, title: { display: true, text: "Conv %" } }
+      }
+    }
+  });
+}
+
+function renderAdminFlags(flags) {
+  if (!adminFlagList) return;
+  adminFlagList.innerHTML = "";
+  if (!flags?.length) {
+    adminFlagList.innerHTML = "<p>No feature flags configured.</p>";
+    return;
+  }
+  flags.forEach(flag => {
+    const item = document.createElement("div");
+    item.className = "flag-item";
+    item.innerHTML = `
+      <div class="flag-meta">
+        <div class="flag-key">${flag.key.replace(/_/g, " ")}</div>
+        ${flag.description ? `<div class="flag-desc">${flag.description}</div>` : ""}
+      </div>
+      <label class="flag-toggle" title="Toggle ${flag.key}">
+        <input type="checkbox" ${flag.enabled ? "checked" : ""} data-flag="${flag.key}" />
+        <span class="flag-toggle-track"></span>
+      </label>
+    `;
+    const checkbox = item.querySelector("input[type=checkbox]");
+    checkbox.addEventListener("change", async () => {
+      try {
+        await apiFetch(`/api/admin/flags/${encodeURIComponent(flag.key)}`, {
+          method: "PATCH",
+          body: { enabled: checkbox.checked }
+        });
+        // Refresh local cache
+        featureFlags[flag.key] = checkbox.checked;
+      } catch (err) {
+        alert(err.message);
+        checkbox.checked = !checkbox.checked; // revert
+      }
+    });
+    adminFlagList.appendChild(item);
+  });
+}
+
+function renderSessionMetrics(m) {
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  set("metricDau",        m.dau);
+  set("metricWau",        m.wau);
+  set("metricMau",        m.mau);
+  set("metricRetention",  `${m.retentionD7}%`);
+  set("metricNewToday",   m.newUsersToday);
+  set("metricNewWeek",    m.newUsersWeek);
+  set("metricTotal",      m.totalUsers);
+  set("metricBookings30", m.d30Bookings);
+
+  if (!window.Chart || !m.dauTrend?.length) return;
+  const canvas = document.getElementById("chartDauTrend");
+  if (!canvas) return;
+  if (_chartDauTrend) _chartDauTrend.destroy();
+  _chartDauTrend = new window.Chart(canvas, {
+    type: "line",
+    data: {
+      labels: m.dauTrend.map(d => d.date),
+      datasets: [{
+        label: "Bookings/day",
+        data: m.dauTrend.map(d => d.bookings),
+        borderColor: "#0abab5",
+        backgroundColor: "#0abab520",
+        fill: true,
+        tension: 0.3,
+        pointRadius: 4,
+        pointBackgroundColor: "#0abab5"
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: "rgba(0,0,0,0.04)" }, ticks: { font: { size: 10 } } },
+        y: { grid: { color: "rgba(0,0,0,0.06)" }, ticks: { font: { size: 10 } }, beginAtZero: true }
+      }
+    }
+  });
+}
+
+// ── Smart empty state ─────────────────────────────────────────────────────────
+// Builds a contextual "no results" block with actionable suggestions based on
+// which filters are active, whether spots exist at all, and EV filter state.
+function buildEmptyState() {
+  const search    = searchInput?.value.trim() || "";
+  const zone      = zoneFilter?.value || "all";
+  const isEVOnly  = evOnlyFilter?.checked;
+  const allSpots  = spots; // full unfiltered list from last refresh
+
+  const wrap = document.createElement("div");
+  wrap.className = "empty-state";
+
+  const suggestions = [];
+
+  if (isEVOnly && allSpots.some(s => !s.isEV && s.isAvailable)) {
+    suggestions.push({ label: "Show non-EV spots too", action: () => { evOnlyFilter.checked = false; renderSpots(); } });
+  }
+  if (search) {
+    suggestions.push({ label: `Clear search "${search}"`, action: () => { searchInput.value = ""; refreshAll(); } });
+  }
+  if (zone !== "all") {
+    suggestions.push({ label: `Show all zones`, action: () => { zoneFilter.value = "all"; refreshAll(); } });
+  }
+  if (allSpots.length === 0) {
+    suggestions.push({ label: "Refresh availability", action: () => refreshAll() });
+  }
+  if (!suggestions.length) {
+    suggestions.push({ label: "Reset all filters", action: () => {
+      if (searchInput) searchInput.value = "";
+      if (zoneFilter) zoneFilter.value = "all";
+      if (evOnlyFilter) evOnlyFilter.checked = false;
+      refreshAll();
+    }});
+  }
+
+  const icon = document.createElement("div");
+  icon.className = "empty-state-icon";
+  icon.textContent = isEVOnly ? "⚡" : search ? "🔍" : "🅿️";
+
+  const title = document.createElement("p");
+  title.className = "empty-state-title";
+  title.textContent = isEVOnly
+    ? "No EV spots available right now"
+    : search
+      ? `No spots match "${search}"`
+      : zone !== "all"
+        ? `No spots available in ${zone}`
+        : "No spots available";
+
+  const hint = document.createElement("p");
+  hint.className = "empty-state-hint";
+  hint.textContent = "Try one of these:";
+
+  const list = document.createElement("div");
+  list.className = "empty-state-suggestions";
+
+  suggestions.forEach(({ label, action }) => {
+    const btn = document.createElement("button");
+    btn.className = "empty-state-btn";
+    btn.type = "button";
+    btn.textContent = label;
+    btn.addEventListener("click", action);
+    list.appendChild(btn);
+  });
+
+  wrap.appendChild(icon);
+  wrap.appendChild(title);
+  wrap.appendChild(hint);
+  wrap.appendChild(list);
+  return wrap;
+}
+
 function renderSpots() {
   spotGrid.innerHTML = "";
   const visibleSpots = getVisibleSpots();
 
   if (!visibleSpots.length) {
-    const empty = document.createElement("p");
-    empty.textContent = evOnlyFilter.checked
-      ? t("noMatchingEvSpots")
-      : t("noMatchingSpots");
-    spotGrid.appendChild(empty);
+    spotGrid.appendChild(buildEmptyState());
     return;
   }
 
@@ -1171,9 +1738,9 @@ function renderSpots() {
     const bookBtn = node.querySelector(".book-btn");
     const spotTitle = spot.name || spot.id;
     const spotAddress = spot.address || spot.location || t("unavailableAddress");
-    const rawPrice = Number(spot.pricePerHour);
     const rawAvailability = Number(spot.availableSpots || 0);
-    const priceText = Number.isFinite(rawPrice) ? `$${rawPrice.toFixed(2)}/hr` : t("priceUnavailable");
+    const surge = getSurgePrice(spot);
+    const priceText = surge.display !== "N/A" ? surge.display : t("priceUnavailable");
     const statusText = spot.isAvailable
       ? `${rawAvailability} ${rawAvailability === 1 ? t("spotLeft") : t("spotsLeft")}`
       : t("fullBtn");
@@ -1201,12 +1768,38 @@ function renderSpots() {
       evEl.innerHTML = "";
     }
     zoneEl.textContent = spot.zone || "Zone";
-    if (demandEl) {
-      demandEl.classList.toggle("hidden", !spot.highDemand);
+    if (demandEl && featureEnabled("demand_prediction")) {
+      const predicted = predictSpotsInOneHour(spot);
+      const trend = predicted > rawAvailability ? "📈" : predicted < rawAvailability ? "📉" : "→";
+      demandEl.classList.remove("hidden");
+      demandEl.textContent = `${trend} ~${predicted} in 1hr`;
+      demandEl.title = `Predicted available spots in 1 hour based on historical demand`;
+    } else if (demandEl) {
+      demandEl.classList.add("hidden");
     }
     locationEl.textContent = spotAddress;
     availabilityMetricEl.textContent = `${rawAvailability}/${Number(spot.totalSpots || 0) || "?"} spots`;
-    priceMetricEl.textContent = priceText;
+    // Asynchronously load and display average rating
+    if (spot._avgRating !== undefined) {
+      const ratingMetric = node.querySelector(".spot-metric-rating");
+      if (ratingMetric && spot._avgRating) {
+        ratingMetric.textContent = `★ ${spot._avgRating}`;
+        ratingMetric.classList.remove("hidden");
+      }
+    } else {
+      apiFetch(`/api/spots/${spot.id}/rating`, { auth: false }).then(r => {
+        if (!r.average) return;
+        spot._avgRating = r.average;
+        const card2 = spotGrid.querySelector(`[data-spot-id="${spot.id}"]`);
+        const el = card2?.querySelector(".spot-metric-rating");
+        if (el) { el.textContent = `★ ${r.average}`; el.classList.remove("hidden"); }
+      }).catch(() => {});
+    }
+    if (surge.isSurge && featureEnabled("surge_pricing")) {
+      priceMetricEl.innerHTML = `<span class="surge-price">${surge.display}</span> <span class="surge-badge">${surge.surgeLabel}</span> <s class="surge-base">${surge.base}</s>`;
+    } else {
+      priceMetricEl.textContent = priceText;
+    }
     statusEl.textContent = statusText;
     statusEl.classList.remove("available", "occupied");
     statusEl.classList.add(spot.isAvailable ? "available" : "occupied");
@@ -1215,6 +1808,7 @@ function renderSpots() {
 
     card.addEventListener("click", () => {
       selectedMapSpotId = spot.id;
+      trackEvent("spot_view", spot.id);
       mobilePanel = "map";
       syncViewportState();
       renderSpots();
@@ -1234,6 +1828,7 @@ function renderSpots() {
       dialogSpotInfo.textContent = `${spotTitle} · ${spot.zone} · ${priceText}`;
       plateInput.value = "";
       phoneInput.value = "";
+      trackEvent("reserve_start", spot.id);
       dialog.showModal();
     });
 
@@ -1270,8 +1865,8 @@ function renderMapView() {
   }
 
   const rawAvailability = Number(selectedSpot.availableSpots || 0);
-  const rawPrice = Number(selectedSpot.pricePerHour);
-  const priceText = Number.isFinite(rawPrice) ? `$${rawPrice.toFixed(2)}/hr` : "Price unavailable";
+  const mapSurge = getSurgePrice(selectedSpot);
+  const priceText = mapSurge.display !== "N/A" ? mapSurge.display : "Price unavailable";
   const availabilityText = selectedSpot.isAvailable
     ? `${rawAvailability} ${rawAvailability === 1 ? "spot" : "spots"} left`
     : "Full";
@@ -1279,7 +1874,11 @@ function renderMapView() {
   mapDetailMeta.textContent = selectedSpot.address || "Address unavailable";
   mapDetailZone.textContent = selectedSpot.zone || "Zone unavailable";
   mapDetailAvailability.textContent = availabilityText;
-  mapDetailPrice.textContent = priceText;
+  if (mapSurge.isSurge) {
+    mapDetailPrice.innerHTML = `${mapSurge.display} <span class="surge-badge">${mapSurge.surgeLabel}</span>`;
+  } else {
+    mapDetailPrice.textContent = priceText;
+  }
   mapNavigateBtn.disabled = false;
   mapReserveBtn.disabled = !selectedSpot.isAvailable || !currentUser;
 
@@ -1363,19 +1962,37 @@ function handleMapReserve() {
   dialog.showModal();
 }
 
-function openNavigation(locationName, address) {
-  const destination = address && address.trim() ? address.trim() : `${locationName}, Seattle, WA`;
-  const url = `https://www.openstreetmap.org/search?query=${encodeURIComponent(destination)}`;
-  window.open(url, "_blank");
+function openNavigation(locationName, address, lat, lng) {
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  const isMac = /Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1;
+
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    // Use precise coordinates when available
+    if (isIOS || isMac) {
+      window.open(`maps://maps.apple.com/?daddr=${lat},${lng}&dirflg=d`, "_blank");
+    } else {
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`, "_blank");
+    }
+  } else {
+    // Fall back to address text
+    const dest = address && address.trim() ? address.trim() : `${locationName}, Seattle, WA`;
+    if (isIOS || isMac) {
+      window.open(`maps://maps.apple.com/?daddr=${encodeURIComponent(dest)}&dirflg=d`, "_blank");
+    } else {
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}&travelmode=driving`, "_blank");
+    }
+  }
 }
 
 function handleMapNavigate() {
   const targetSpot = spots.find((spot) => spot.id === selectedMapSpotId);
   if (!targetSpot) return;
-
+  const idx = spots.indexOf(targetSpot);
+  const [lat, lng] = getSpotLatLng(targetSpot, idx);
   openNavigation(
     targetSpot.name || targetSpot.id,
-    targetSpot.address || targetSpot.location || ""
+    targetSpot.address || targetSpot.location || "",
+    lat, lng
   );
 }
 
@@ -1397,6 +2014,7 @@ async function handleCheckOut(booking) {
       method: "POST",
       body: { reservationId: booking.id }
     });
+    trackEvent("check_out", booking.spotId);
     await refreshAll();
   } catch (error) {
     alert(error.message);
@@ -1438,12 +2056,38 @@ function renderBookings() {
     node.querySelector(".booking-plate").textContent = `${t("platePhone")} ${booking.plate} / ${t("phoneNumber")}: ${booking.phone}`;
     node.querySelector(".booking-owner").textContent = `${t("bookingOwner")} ${booking.ownerName}`;
 
+    const qrCanvas = node.querySelector(".booking-qr");
     if (booking.ticketCode) {
       const checkInText = booking.checkInTime ? fmtDate(booking.checkInTime) : "Just now";
       ticketEl.textContent = `Ticket ${booking.ticketCode} · Checked in ${checkInText}`;
       ticketEl.classList.remove("hidden");
+      // Generate QR code for the ticket code
+      if (qrCanvas && window.QRCode) {
+        window.QRCode.toCanvas(qrCanvas, booking.ticketCode, { width: 100, margin: 1, color: { dark: "#0f1923", light: "#ffffff" } }, () => {});
+        qrCanvas.classList.remove("hidden");
+      }
     } else {
       ticketEl.classList.add("hidden");
+      if (qrCanvas) qrCanvas.classList.add("hidden");
+    }
+
+    // Countdown timer
+    const countdownEl = node.querySelector(".booking-countdown");
+    if (countdownEl) {
+      if (booking.status === "PENDING" && booking.createdAt) {
+        // PENDING expires 5 min after creation
+        const expiresAt = new Date(booking.createdAt).getTime() + 5 * 60 * 1000;
+        countdownEl.dataset.countdownTarget = String(expiresAt);
+        countdownEl.dataset.countdownLabel = "Expires";
+        countdownEl.classList.remove("hidden");
+      } else if (booking.status === "ACTIVE" && booking.endTime) {
+        const endsAt = new Date(booking.endTime).getTime();
+        countdownEl.dataset.countdownTarget = String(endsAt);
+        countdownEl.dataset.countdownLabel = "Ends";
+        countdownEl.classList.remove("hidden");
+      } else {
+        countdownEl.classList.add("hidden");
+      }
     }
 
     if (booking.status === "PENDING") {
@@ -1468,6 +2112,31 @@ function renderBookings() {
       settlementEl.classList.add("hidden");
     }
 
+    // Star rating for completed bookings
+    const ratingEl = node.querySelector(".booking-rating");
+    if (ratingEl && booking.status === "COMPLETED") {
+      ratingEl.classList.remove("hidden");
+      const stars = ratingEl.querySelectorAll(".star-btn");
+      let selectedStars = 0;
+      const paintStars = (n) => stars.forEach((s, i) => s.classList.toggle("filled", i < n));
+      stars.forEach(btn => {
+        btn.addEventListener("mouseover", () => paintStars(Number(btn.dataset.star)));
+        btn.addEventListener("mouseout", () => paintStars(selectedStars));
+        btn.addEventListener("click", async () => {
+          const val = Number(btn.dataset.star);
+          selectedStars = val;
+          paintStars(val);
+          ratingEl.querySelector(".rating-prompt").textContent = `Thanks for rating ${"★".repeat(val)}`;
+          try {
+            await apiFetch(`/api/spots/${booking.spotId}/rate`, {
+              method: "POST",
+              body: { stars: val, reservationId: booking.id }
+            });
+          } catch { /* silent — rating is best-effort */ }
+        });
+      });
+    }
+
     const cancelBtn = node.querySelector(".cancel-btn");
     cancelBtn.classList.toggle("hidden", booking.status === "COMPLETED");
     cancelBtn.addEventListener("click", async () => {
@@ -1481,6 +2150,41 @@ function renderBookings() {
 
     bookingList.appendChild(node);
   });
+
+  // Start live countdown tickers for all visible countdown elements
+  startCountdownTimers();
+}
+
+let countdownInterval = null;
+function startCountdownTimers() {
+  if (countdownInterval) clearInterval(countdownInterval);
+
+  function tick() {
+    const now = Date.now();
+    document.querySelectorAll(".booking-countdown[data-countdown-target]").forEach(el => {
+      const target = Number(el.dataset.countdownTarget);
+      const label = el.dataset.countdownLabel || "Ends";
+      const diffMs = target - now;
+      if (diffMs <= 0) {
+        el.textContent = `${label}: expired`;
+        el.classList.add("countdown-expired");
+        el.classList.remove("countdown-urgent");
+        return;
+      }
+      const totalSec = Math.floor(diffMs / 1000);
+      const h = Math.floor(totalSec / 3600);
+      const m = Math.floor((totalSec % 3600) / 60);
+      const s = totalSec % 60;
+      const display = h > 0
+        ? `${h}h ${String(m).padStart(2, "0")}m`
+        : `${m}:${String(s).padStart(2, "0")}`;
+      el.textContent = `${label} in ${display}`;
+      el.classList.toggle("countdown-urgent", diffMs < 2 * 60 * 1000);
+    });
+  }
+
+  tick(); // immediate first paint
+  countdownInterval = setInterval(tick, 1000);
 }
 
 async function recommendSpot(options = {}) {
@@ -1539,14 +2243,69 @@ async function recommendSpot(options = {}) {
 
 // ── AI En-route Parking Recommendation ─────────────────────────────────────
 
+// Normalise the departure input: bare US ZIP codes get ", WA, USA" appended so
+// Nominatim resolves them unambiguously instead of returning random world results.
+function normaliseAddressInput(raw) {
+  const trimmed = raw.trim();
+  // Match 5-digit or ZIP+4 (e.g. 98006 or 98006-1234)
+  if (/^\d{5}(-\d{4})?$/.test(trimmed)) {
+    return `${trimmed}, WA, USA`;
+  }
+  return trimmed;
+}
+
+// ── Address autocomplete ──────────────────────────────────────────────────────
+const addressSuggestions = document.getElementById("addressSuggestions");
+
+async function fetchAndShowSuggestions(query) {
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&countrycodes=us`;
+    const res = await fetch(url, { headers: { "User-Agent": "CampusPark/1.0 (campus-parking-app)" } });
+    if (!res.ok) return;
+    const results = await res.json();
+    renderAddressSuggestions(results);
+  } catch { /* network issue — silently skip */ }
+}
+
+function renderAddressSuggestions(results) {
+  if (!addressSuggestions) return;
+  if (!results.length) { hideAddressSuggestions(); return; }
+  addressSuggestions.innerHTML = "";
+  results.forEach((r, idx) => {
+    const btn = document.createElement("button");
+    btn.className = "autocomplete-item";
+    btn.type = "button";
+    btn.textContent = r.display_name;
+    btn.tabIndex = 0;
+    btn.addEventListener("mousedown", (e) => e.preventDefault()); // prevent blur before click
+    btn.addEventListener("click", () => {
+      if (departureInput) departureInput.value = r.display_name;
+      hideAddressSuggestions();
+      departureInput?.focus();
+    });
+    btn.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown") { e.preventDefault(); results[idx + 1] && btn.nextElementSibling?.focus(); }
+      if (e.key === "ArrowUp") { e.preventDefault(); idx === 0 ? departureInput?.focus() : btn.previousElementSibling?.focus(); }
+      if (e.key === "Escape") { hideAddressSuggestions(); departureInput?.focus(); }
+    });
+    addressSuggestions.appendChild(btn);
+  });
+  addressSuggestions.hidden = false;
+}
+
+function hideAddressSuggestions() {
+  if (addressSuggestions) addressSuggestions.hidden = true;
+}
+
 async function geocodeAddress(address) {
-  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`;
+  const query = normaliseAddressInput(address);
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&countrycodes=us`;
   const res = await fetch(url, {
     headers: { "User-Agent": "CampusPark/1.0 (campus-parking-app)" }
   });
   if (!res.ok) throw new Error("Geocoding request failed. Please try again.");
   const data = await res.json();
-  if (!data || !data.length) throw new Error(`Could not locate "${address}". Try a more specific address.`);
+  if (!data || !data.length) throw new Error(`Could not locate "${address}". Try a full address or valid ZIP code.`);
   return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), name: data[0].display_name };
 }
 
@@ -1713,6 +2472,8 @@ async function handleLogin() {
     syncSessionUi();
     await refreshAll();
     navigateTo(currentUser.role === "admin" ? "/admin" : "/");
+    // Ask for notification permission after successful login (natural moment)
+    requestNotificationPermission();
   } catch (error) {
     showAuthError(error.message);
   }
@@ -1793,9 +2554,13 @@ async function handleConfirmBooking(event) {
     return;
   }
 
+  // Generate a stable idempotency key for this booking attempt so network
+  // retries replaying the same request never create a duplicate reservation.
+  const bookingIdempotencyKey = generateIdempotencyKey();
   try {
-    await apiFetch("/api/bookings", {
+    const booking = await apiFetch("/api/bookings", {
       method: "POST",
+      idempotencyKey: bookingIdempotencyKey,
       body: {
         spotId: selectedSpotId,
         plate,
@@ -1805,10 +2570,43 @@ async function handleConfirmBooking(event) {
       }
     });
     dialog.close();
+    trackEvent("reserve_complete", selectedSpotId, { plate });
     await refreshAll();
+    // Schedule local notification: warn 1 min before 5-min PENDING expiry
+    scheduleLocalNotification(
+      "⏰ Reservation Expiring",
+      `Your reservation for ${plate} expires in 1 minute — check in now!`,
+      4 * 60 * 1000  // 4 minutes after booking creation
+    );
   } catch (error) {
     alert(error.message);
   }
+}
+
+// ── Local notification scheduling ────────────────────────────────────────────
+async function requestNotificationPermission() {
+  if (!("Notification" in window)) return false;
+  if (Notification.permission === "granted") return true;
+  if (Notification.permission === "denied") return false;
+  const result = await Notification.requestPermission();
+  return result === "granted";
+}
+
+const notifTimers = new Set();
+async function scheduleLocalNotification(title, body, delayMs) {
+  const granted = await requestNotificationPermission();
+  if (!granted) return;
+  const id = setTimeout(() => {
+    notifTimers.delete(id);
+    if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.ready.then(reg => {
+        reg.showNotification(title, { body, icon: "/icons/icon-192.png", tag: "campuspark-alert" });
+      });
+    } else {
+      new Notification(title, { body });
+    }
+  }, delayMs);
+  notifTimers.add(id);
 }
 
 async function handleConfirmCheckIn(event) {
@@ -1838,6 +2636,8 @@ async function handleConfirmCheckIn(event) {
         ticketCode
       }
     });
+    const checkedInBooking = myBookings.find(b => b.id === selectedCheckInBookingId);
+    if (checkedInBooking) trackEvent("check_in", checkedInBooking.spotId);
     checkInDialog.close();
     selectedCheckInBookingId = null;
     await refreshAll();
@@ -1849,11 +2649,20 @@ async function handleConfirmCheckIn(event) {
   }
 }
 
+function generateIdempotencyKey() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
 async function apiFetch(path, options = {}) {
   const method = options.method || "GET";
   const headers = { "Content-Type": "application/json" };
   if (options.auth !== false) {
     Object.assign(headers, authHeaders());
+  }
+  // Auto-attach idempotency key for mutating requests to prevent double-submit
+  if ((method === "POST" || method === "PUT" || method === "PATCH") && !options.skipIdempotency) {
+    headers["Idempotency-Key"] = options.idempotencyKey || generateIdempotencyKey();
   }
   let response;
   try {

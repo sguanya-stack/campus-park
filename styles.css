@@ -35,6 +35,31 @@ html {
   color-scheme: light;
 }
 
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0d1b26;
+  --bg-top: #111e2b;
+  --ink: #e2edf5;
+  --muted: #7a96ad;
+  --accent: #0abab5;
+  --accent-deep: #0dd4ce;
+  --accent-fog: rgba(10, 186, 181, 0.16);
+  --line: rgba(10, 186, 181, 0.16);
+  --line-strong: rgba(10, 186, 181, 0.28);
+  --card: rgba(16, 28, 42, 0.95);
+  --card-solid: #121e2c;
+  --white: #14202f;
+  --ok: #0abab5;
+  --ok-bg: rgba(10, 186, 181, 0.14);
+  --warn: #e07850;
+  --warn-bg: rgba(224, 120, 80, 0.14);
+  --ai: #9b92f8;
+  --ai-bg: rgba(155, 146, 248, 0.10);
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.35), 0 1px 4px rgba(0, 0, 0, 0.25);
+  --shadow-hover: 0 16px 40px rgba(0, 0, 0, 0.45), 0 8px 20px rgba(10, 186, 181, 0.15);
+  --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.25), 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -45,6 +70,7 @@ body {
     radial-gradient(circle at top right, rgba(10, 186, 181, 0.08), transparent 24%),
     linear-gradient(180deg, var(--bg-top) 0%, var(--bg) 100%);
   overflow: hidden;
+  transition: background 0.25s, color 0.25s;
 }
 
 .bg-grid {
@@ -479,6 +505,65 @@ select:focus {
   box-shadow: 0 0 0 1px rgba(124, 111, 247, 0.22), var(--shadow-hover);
 }
 
+/* ── Star ratings ───────────────────────────────── */
+.spot-metric-rating {
+  color: #f59e0b;
+  font-weight: 700;
+  font-size: 12px;
+}
+.booking-rating {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.rating-prompt {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 6px;
+}
+.star-picker {
+  display: flex;
+  gap: 4px;
+}
+.star-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 22px;
+  color: #d1d5db;
+  padding: 0;
+  transition: color 0.1s, transform 0.1s;
+  line-height: 1;
+}
+.star-btn:hover,
+.star-btn.filled {
+  color: #f59e0b;
+  transform: scale(1.15);
+}
+
+/* ── Surge pricing ──────────────────────────────── */
+.surge-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(220, 38, 38, 0.12);
+  color: #dc2626;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+.surge-price {
+  font-weight: 700;
+  color: #dc2626;
+}
+.surge-base {
+  font-size: 11px;
+  color: var(--muted);
+  text-decoration: line-through;
+  margin-left: 2px;
+}
+
 .spot-ai-banner {
   display: flex;
   align-items: center;
@@ -570,12 +655,13 @@ select:focus {
 }
 
 .spot-demand {
-  background: linear-gradient(135deg, rgba(255, 120, 66, 0.2), rgba(255, 189, 66, 0.28));
-  color: #9a4a0b;
-  border: 1px solid rgba(255, 140, 66, 0.3);
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  background: rgba(99, 102, 241, 0.08);
+  color: #4338ca;
+  border: 1px solid rgba(99, 102, 241, 0.20);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  font-size: 10px;
+  cursor: help;
 }
 
 .spot-ev i {
@@ -674,6 +760,79 @@ select:focus {
 .booking-status.is-pending {
   background: rgba(255, 177, 66, 0.12);
   color: #9a5d10;
+}
+
+/* ── Smart empty state ──────────────────────────────────────────────── */
+.empty-state {
+  padding: 36px 16px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.empty-state-icon {
+  font-size: 40px;
+  margin-bottom: 4px;
+}
+.empty-state-title {
+  font-weight: 600;
+  font-size: 15px;
+  margin: 0;
+  color: var(--fg);
+}
+.empty-state-hint {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+}
+.empty-state-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 4px;
+}
+.empty-state-btn {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1.5px solid var(--accent);
+  background: none;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.empty-state-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.booking-countdown {
+  display: inline-block;
+  margin: 4px 0 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(10, 186, 181, 0.10);
+  color: var(--accent-deep);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.booking-countdown.countdown-urgent {
+  background: rgba(220, 38, 38, 0.10);
+  color: #dc2626;
+  animation: countdown-pulse 1s ease-in-out infinite;
+}
+.booking-countdown.countdown-expired {
+  background: rgba(107, 114, 128, 0.10);
+  color: var(--muted);
+}
+@keyframes countdown-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 
 .booking-actions {
@@ -968,6 +1127,63 @@ select:focus {
   background: rgba(18, 35, 51, 0.22);
   backdrop-filter: blur(6px);
 }
+
+/* ── Onboarding guide ───────────────────────────────────────────────── */
+.onboarding-dialog {
+  width: min(92vw, 440px);
+}
+.onboarding-inner {
+  padding: 32px 28px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.onboarding-slides {
+  position: relative;
+  min-height: 180px;
+}
+.onboarding-slide {
+  display: none;
+  text-align: center;
+  animation: onboard-in 0.3s ease;
+}
+.onboarding-slide.active { display: block; }
+@keyframes onboard-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+.onboarding-icon { font-size: 48px; margin-bottom: 12px; }
+.onboarding-slide h2 { font-size: 20px; margin: 0 0 10px; letter-spacing: -0.02em; }
+.onboarding-slide p  { font-size: 14px; color: var(--muted); line-height: 1.6; margin: 0; }
+.onboarding-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+.onboarding-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background 0.2s, transform 0.2s;
+  cursor: pointer;
+}
+.onboarding-dot.active { background: var(--accent); transform: scale(1.25); }
+.onboarding-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: center;
+}
+.btn-ghost {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 6px 8px;
+}
+.btn-ghost:hover { color: var(--fg); }
 
 .dialog form {
   padding: 18px;
@@ -1462,6 +1678,37 @@ select:focus {
   flex-shrink: 0;
 }
 
+.zip-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.zip-chip-label {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.zip-chip {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.zip-chip:hover {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
 .ai-result-panel {
   margin-top: 12px;
 }
@@ -1606,22 +1853,6 @@ select:focus {
   padding: 14px 18px 18px;
 }
 
-.spot-grid {
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 6px;
-  align-content: start;
-  scrollbar-width: thin;
-}
-
-.spot-grid::-webkit-scrollbar {
-  width: 10px;
-}
-
-.spot-grid::-webkit-scrollbar-thumb {
-  background: rgba(10, 186, 181, 0.16);
-  border-radius: 999px;
-}
 
 .parking-spot-card {
   padding: 16px;
@@ -1796,9 +2027,79 @@ select:focus {
 
 .admin-stats-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
+
+.admin-charts {
+  padding: 18px;
+}
+.admin-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  margin-top: 12px;
+}
+.admin-chart-wrap {
+  position: relative;
+}
+.chart-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 8px;
+}
+
+/* ── Feature flags admin UI ─────────────────────────────────────────── */
+.flag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+.flag-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+.flag-meta { flex: 1; min-width: 0; }
+.flag-key  { font-weight: 600; font-size: 13px; }
+.flag-desc { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.flag-toggle {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  flex-shrink: 0;
+}
+.flag-toggle input { opacity: 0; width: 0; height: 0; }
+.flag-toggle-track {
+  position: absolute;
+  inset: 0;
+  background: #ccc;
+  border-radius: 99px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.flag-toggle input:checked + .flag-toggle-track { background: var(--accent); }
+.flag-toggle-track::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s;
+}
+.flag-toggle input:checked + .flag-toggle-track::before { transform: translateX(18px); }
 
 .admin-stat {
   padding: 18px;
@@ -2040,4 +2341,95 @@ body.reservations-route {
   .install-prompt-actions {
     flex-direction: column;
   }
+}
+
+/* ── Dark mode toggle button ────────────────────────────────────────────────── */
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--line-strong);
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+.btn-icon:hover {
+  background: var(--accent-fog);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.btn-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ── Address autocomplete dropdown ─────────────────────────────────────────── */
+.autocomplete-wrap {
+  position: relative;
+}
+.autocomplete-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 200;
+  background: var(--card-solid);
+  border: 1.5px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.autocomplete-item {
+  display: block;
+  width: 100%;
+  padding: 10px 14px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  line-height: 1.4;
+  transition: background 0.12s;
+}
+.autocomplete-item:last-child {
+  border-bottom: none;
+}
+.autocomplete-item:hover,
+.autocomplete-item:focus {
+  background: var(--accent-fog);
+  color: var(--accent-deep);
+  outline: none;
+}
+
+/* ── Booking QR code ────────────────────────────────────────────────────────── */
+.booking-qr {
+  display: block;
+  width: 100px;
+  height: 100px;
+  border-radius: 8px;
+  margin-top: 10px;
+  border: 1.5px solid var(--line-strong);
+  background: #fff;
+}
+html[data-theme="dark"] .booking-qr {
+  border-color: var(--line-strong);
+  /* QR library always renders dark on white — keep white bg */
+}
+
+/* ── Admin CSV export button ─────────────────────────────────────────────────  */
+.admin-export-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 0 16px;
 }
