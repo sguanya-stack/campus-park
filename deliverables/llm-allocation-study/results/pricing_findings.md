@@ -1,119 +1,125 @@
-# Experiment B 结果：动态定价基准（已完成）
+# Experiment B results: dynamic pricing benchmark (complete)
 
-数据：`pricing_summary.csv`，270 episode（3 定价策略 × 3 负载 × 30 种子），全尺寸车队
-（24 个真实车库，833 个车位）。分配器固定为 Greedy（B2），**只有价格在变**，所以差异
-可完全归因于定价策略。配对设计：三个策略共用同一组随机种子。
+Data: `pricing_summary.csv`, 270 episodes (3 pricing policies x 3 load levels x 30 seeds), full
+fleet (24 real garages, 833 spaces). The allocator is held fixed at Greedy, so **only price
+varies** and any difference is attributable to pricing alone. Paired design: all three arms see
+the same seeded scenarios.
 
-| 策略 | 定义 |
+All numbers below are post-Amendment A-2 (real OSM coordinates).
+
+| Arm | Definition |
 |---|---|
-| P0 static | CSV 真实价格，不调整 |
-| P1 rule surge | 争抢中的车位 ×1.5（`server.js:574` 生产规则的尺度无关改写） |
-| P2 permuted | 施加**与 P1 数量完全相同**的 ×1.5，但**随机撒到其他车位上** |
+| P0 static | Real CSV prices, never adjusted |
+| P1 rule surge | x1.5 on contested spots — the production rule (`server.js:574`), rewritten scale-free |
+| P2 permuted | The **same number** of x1.5 surcharges P1 applied in that window, relocated to randomly chosen spots |
+
+**Why P2 is a permutation control rather than "a random multiplier with the same mean."** The
+original plan specified U[1.0, 1.5]. That does not actually match: U[1.0, 1.5] has a mean of
+1.25, which equals P1's mean only if the surge fires exactly 50% of the time, and the trigger
+rate is unknown. Re-using P1's realized surcharge **count** and permuting only its placement
+makes the marginal price distribution identical **by construction** at any trigger rate
+(measured: mean multipliers 1.144 vs 1.143), leaving targeting as the sole difference.
 
 ---
 
-## 主结果一：生产规则**没有**提升车位利用率——它显著降低了利用率
+## Result 1: the production rule reduces utilization
 
-利用率是 Proposal §6.3 预先声明的主指标。结论是反方向的：
+Utilization was this experiment's pre-registered primary metric. The result runs opposite to
+the hypothesis.
 
-| ρ | P0 利用率 | P1 利用率 | 差异 | Cohen's d | p |
-|---|---|---|---|---|---|
-| 0.8 | 0.3230 | 0.3182 | **−1.31%** | −1.17 | 5.6e−07 |
-| 1.2 | 0.4422 | 0.4383 | **−1.02%** | −0.58 | 3.4e−03 |
-| 2.0 | 0.6420 | 0.6193 | **−3.79%** | −4.09 | 2.9e−18 |
+| rho | Utilization change (P1 vs P0) | Cohen's d | p |
+|---|---|---|---|
+| 0.8 | −1.31% | −1.24 | 1.8e−07 |
+| 1.2 | −1.02% | −1.02 | 4.7e−06 |
+| 2.0 | **−3.79%** | −3.58 | 2.9e−18 |
 
-而且**争抢越严重，损失越大**（−1.02% → −3.79%）。加价把一部分价格敏感用户挤出了市场，
-他们并没有全部被便宜车位接住。
+Losses grow with contention. The rule is more accurately described as **trading utilization for
+revenue** than as an efficiency mechanism.
 
-这是一个货真价实的负面结果，正是 Proposal §0 里预留的那种"能推翻自己"的空间。
+## Result 2: the revenue gain comes from targeting, not from raising prices
 
-## 主结果二：加价真正赚到钱的原因是**瞄准**，不是涨价本身
+At matched average multipliers, aiming surcharges at contested spots earned **+5.94% more than
+the permutation control** (rho=2.0, d=+3.98, p=1.6e−19). Without P2, the natural reading would
+have been "dynamic pricing raises revenue 6%", crediting the price increase.
 
-P1 与 P2 的平均价格乘数几乎完全相同（见下表最后一列），唯一区别是加价撒在哪里。
+## Result 3: untargeted increases capture no revenue — with one boundary condition
 
-| ρ | P1 收入 | P2 收入 | P1 − P2 | Cohen's d | p | 两者平均乘数 |
-|---|---|---|---|---|---|---|
-| 0.8 | \$5,147.71 | \$4,996.02 | **+3.04%** | +1.67 | 4.7e−10 | 1.056 / 1.065 |
-| 1.2 | \$7,570.69 | \$7,115.01 | **+6.40%** | +3.69 | 1.3e−18 | 1.090 / 1.096 |
-| 2.0 | \$11,754.51 | \$10,994.03 | **+5.94%** | +3.96 | 1.6e−19 | 1.144 / 1.143 |
+P2 charged **13.8% higher average prices** than P0 and revenue **fell 0.78%** (p=0.008).
 
-## 主结果三：不瞄准的涨价赚不到钱 —— ⚠️ **但这条经不起敏感性检验，见下方更正**
+Because price sensitivity is an **assumed, unmeasured** parameter, the sweep required by the
+proposal's threats-to-validity table was run: 5 settings varying both the **level** and the
+**spread** of price sensitivity, with every other request attribute held byte-identical.
 
-P2 在收更高的价格，但收入几乎没有变化，高负载下反而**显著变少**：
-
-| ρ | P2 比 P0 多收的平均价格 | P2 收入变化 | 95% CI | p | P2 利用率变化 |
-|---|---|---|---|---|---|
-| 0.8 | +6.5% | +0.29% | [−3.10, +33.53] | 0.139（不显著） | −1.53% |
-| 1.2 | +9.6% | +0.03% | [−30.17, +35.77] | 0.897（不显著） | −2.37% |
-| 2.0 | +13.8% | **−0.78%** | [−142.67, −18.77] | **0.021（显著变差）** | −4.74% |
-
-**把价格随机抬高 13.8%，收入反而显著下降 0.78%**——因为被赶走的正是那些本来愿意付钱的
-边际用户。同样幅度的加价瞄准争抢车位，收入是 **+6.15%**。
-
-### ⚠️ 更正：结论三只在特定人群假设下成立（敏感性扫描结果）
-
-上表基于 `price_weight ~ U[0.8,1.2]` 这一**设定的、未实测的**价格敏感度分布。
-按 Proposal §7 的要求扫了 5 档之后，这条结论**只翻转 1 档**
-（完整数据：[pricing_sensitivity.md](pricing_sensitivity.md)）：
-
-| 人群 | 弹性 均值/离散 | P2 多收价格 | P2 收入 vs P0 | 支持结论③？ |
+| Population | elasticity mean/sd | P2 charged | P2 revenue vs P0 | Supports result 3? |
 |---|---|---|---|---|
-| 低敏感、同质 | 0.50 / 0.06 | +16.0% | **+2.91%**（p<0.001） | **否 —— 确实赚钱** |
-| 基线 | 1.00 / 0.12 | +13.8% | −0.78%（p=0.008） | 是 —— 亏钱 |
-| 高敏感、同质 | 2.00 / 0.23 | +7.8% | **−2.14%**（p<0.001） | 是 —— 亏钱 |
-| 中敏感、离散大 | 1.10 / 0.52 | +13.0% | +0.14%（不显著，p=0.57） | 是 —— 一分没赚到 |
-| 高敏感、离散很大 | 2.00 / 1.10 | +9.1% | +0.07%（不显著，p=0.76） | 是 —— 一分没赚到 |
+| low level, homogeneous | 0.50 / 0.06 | +16.0% | **+2.91%** (p<0.001) | **no — genuinely profitable** |
+| BASELINE | 1.00 / 0.12 | +13.8% | −0.78% (p=0.008) | yes — loses money |
+| high level, homogeneous | 2.00 / 0.23 | +7.8% | **−2.14%** (p<0.001) | yes — loses money |
+| mid level, wide | 1.10 / 0.52 | +13.0% | +0.14% (n.s., p=0.57) | yes — captures nothing |
+| high level, very wide | 2.00 / 1.10 | +9.1% | +0.07% (n.s., p=0.76) | yes — captures nothing |
 
-**判定规则（写明以免事后挑拣）**：结论③主张"不瞄准的涨价赚不到钱"，因此只要收入变化
-**不显著为正**即算支持，只有**显著为正**才算推翻。按此规则它在 **5 档里 4 档成立**，
-仅在真正价格不敏感的人群下失效——那种人群全面涨价确实有利可图。
+**Decision rule, stated so the tally cannot be gamed:** the claim is that untargeted increases
+*capture no revenue*. It is therefore **supported** whenever the revenue change is not
+significantly positive, and **contradicted** only by a significant gain. On that rule it holds
+in **4 of 5** settings and fails in one — the genuinely price-insensitive population, where
+blanket pricing does pay.
 
-**正确的表述必须带条件**：不瞄准的涨价只在需求"平均价格敏感 **且** 同质"时无利可图。
-需求整体不敏感、或异质性足够大时，全面涨价是赚钱的——在**同样的均值 2.0** 下，同质人群
-是 −2.14%，离散很大的人群是 +0.07%，仅仅因为存在一条价格不敏感的尾巴可供榨取剩余。
-基线设定恰好落在翻转点附近，这正说明单点设定不足以支撑这条结论。
+(The `consistent` column in `pricing_sensitivity.md` applies a stricter rule, counting only
+settings with a *significant loss*, which is why the generator prints 2/5. Both are defensible;
+quoting them interchangeably is not.)
 
-要把它变成可靠结论，需要 CampusPark 的**真实价格弹性数据**（不同价位下的转化率），
-而不是更多仿真。
+The mechanism is interpretable: **level** decides how much volume an increase destroys, while
+**spread** decides whether surplus can still be extracted from an insensitive tail. At the
+**same mean elasticity of 2.0**, the homogeneous population loses 2.14% while the highly
+heterogeneous one captures nothing at all (+0.07%, n.s.) rather than losing.
 
-### P2 这个对照组依然是必需的
+Settling which regime real CampusPark users occupy requires **measured price elasticity** —
+conversion at different price points — not more simulation.
 
-即便结论三被削弱，置换对照的价值没有变：如果只跑 P0 vs P1，会得到"动态定价提升收入
-6.15%"并自然归因于"涨价"。有了 P2 才能把"涨价"与"瞄准"拆开——而**拆开后的结论二
-（瞄准本身有价值）在 5 档里有 4 档成立**，比结论三稳健得多。
+### The permutation control was necessary either way
+
+Even with result 3 carrying a boundary condition, P2 earned its place: running only P0 vs P1
+would have yielded "dynamic pricing raises revenue 6.15%" attributed to the price increase.
+P2 is what separates "raising prices" from "aiming them" — and the resulting **result 2 is
+considerably more robust than result 3**.
 
 ---
 
-## 综合结论
+## Overall conclusion
 
-生产环境的 surge 规则做的是一笔**用利用率换收入**的交易：收入 +6.15%（ρ=2.0），
-代价是利用率 −3.79%。它不是 Proposal 原本假设的"提升利用率"的手段。这笔交易值不值，
-取决于运营目标——如果 KPI 是车位周转率，这条规则是有害的；如果是营收，它有效，而且
-**有效的主要原因是瞄准算法而非价格杠杆**（结论二，5 档里 4 档成立），所以优化方向应该是
-改进需求信号而不是调高倍数。
+The production surge rule makes a **utilization-for-revenue trade**: revenue up, at the cost of
+3.79% utilization at high contention (rho=2.0). It is not the utilization-improving mechanism
+the proposal assumed. Whether the trade is worthwhile depends on the operating objective — if
+the KPI is turnover, the rule is harmful; if it is revenue, it works, and **it works mainly
+because of the targeting algorithm rather than the price lever**, so the thing to optimise is
+the demand signal, not the multiplier.
 
-按稳健性排序，三条结论可以对外讲到什么程度：
+Ranked by robustness, here is how far each result can be stated:
 
-| 结论 | 敏感性扫描 | 可以怎么说 |
+| Result | Sensitivity sweep | How to report it |
 |---|---|---|
-| ① 规则降低利用率 | **5/5 一致**，且量级随敏感度单调 | 可以直接报告 |
-| ② 瞄准比随机加价更赚钱 | 4/5 一致 | 报告时必须带边界条件（高敏感且同质人群下失效） |
-| ③ 随机涨价赚不到钱 | **仅 2/5** | **不能作为普适结论**，只能作为"在基线假设下观察到"
+| 1. The rule lowers utilization | **5/5 consistent**, magnitude monotone in elasticity | Report unconditionally |
+| 2. Targeting beats same-mean random surcharges | 4/5 | Report **with a boundary condition** (fails for a uniformly highly price-sensitive population) |
+| 3. Untargeted increases capture no revenue | 4/5 under the stated rule | Report **with the qualifier** that it fails for genuinely price-insensitive demand |
 
-## 有效性限制（必须随结论一起报告）
+## Threats to validity, to be reported alongside the results
 
-1. ~~**需求模型是我构建的**，需要做价格敏感度的敏感性扫描~~ → **已完成**，扫了 5 档
-   （见 [pricing_sensitivity.md](pricing_sensitivity.md)）。结果：结论① 5/5 稳健、
-   结论② 4/5、**结论③ 4/5 会翻转**。相应的更正已写在上面。剩余限制是：要确定真实
-   人群落在这 5 档的哪一档，需要 CampusPark 的实际价格弹性数据。
-2. **触发规则是改写过的**。生产用 `demandSearchCount > 20`（绝对阈值），在仿真里改成
-   "上一窗口指向该车位的需求 > 当前空闲车道数"（尺度无关）。方向一致但不是同一条规则，
-   不能声称复现了生产系统的精确行为。
-3. **只测了 ×1.5 一档**。倍数本身没有扫描，所以"应该调高还是调低倍数"这个问题本研究
-   回答不了。
-4. **利用率的定义**是已占用车位·分钟 / 总容量车位·分钟，没有区分"空置"和"被定价赶走"。
+1. ~~The demand model is mine and needs a price-sensitivity sweep~~ → **done**, 5 settings (see
+   [pricing_sensitivity.md](pricing_sensitivity.md)). The remaining limitation is that
+   identifying which setting real users occupy requires actual elasticity data from CampusPark.
+2. **The trigger rule was rewritten.** Production uses `demandSearchCount > 20` (an absolute
+   threshold); the simulation uses "demand aimed at this spot in the previous window exceeds
+   its currently free lanes" (scale-free). The direction matches, but it is not the same rule,
+   so this does not claim to reproduce production behaviour exactly.
+3. **Only the x1.5 multiplier was tested.** The multiplier itself was not swept, so this
+   experiment cannot say whether it should be raised or lowered.
+4. **Utilization is defined** as occupied space-minutes / total capacity space-minutes, which
+   does not distinguish "empty" from "priced away".
+5. **Capacity and EV availability remain synthetic** (see
+   [data_provenance.md](../data_provenance.md)). Coordinates are now real; capacity is derived
+   from the availability-fraction proxy.
 
-## 复现
+## Reproducing
 
 ```bash
 python3 -m harness.run_pricing_experiment --n-seeds 30 --out-name pricing_summary

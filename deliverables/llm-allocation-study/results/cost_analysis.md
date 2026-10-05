@@ -1,69 +1,79 @@
-# 成本分析：Proposal §6.2 的预算推理需要修正
+# Cost analysis: the proposal's budget reasoning needed correcting
 
-由 `python -m harness.estimate_cost` 离线生成（不花钱、不需要 API key）。
-口径：compact 场景（`--target-capacity 30`，24/36/60 请求对应 ρ=0.8/1.2/2.0），
-n=30 seeds/格，3 个负载水平，T1 + T2 两个 LLM 臂全跑完。
+Generated offline by `python -m harness.estimate_cost` — no API key, no spend.
 
-**准确性声明**：token 数是 chars/4 的启发式估算，不是真实分词器；输出 token 里
-包含一个**假设的**思考 token 预算。这是数量级规划数字，不是账单。真实数字要跑一个
-pilot episode 读 `cost_usd`。
+Scope: the compact scenario (`--target-capacity 30`; 24/36/60 requests at rho=0.8/1.2/2.0),
+n=30 seeds per cell, 3 load levels, both LLM arms (T1 + T2) run to completion.
 
-## 发现 1：预算几乎完全由 broker 的思考 token 决定
+**Accuracy statement.** Token counts are a chars/4 heuristic, not the real tokenizer, and the
+output figure includes an **assumed** thinking-token budget. These are order-of-magnitude
+planning numbers, not a bill. The real figure comes from running one pilot episode and reading
+`cost_usd`.
 
-| broker 思考 token/次调用 | T1 小计 | T2 小计 | **总计** |
+## Finding 1: the budget is almost entirely determined by the broker's thinking tokens
+
+| Broker thinking tokens per call | T1 subtotal | T2 subtotal | **Total** |
 |---|---|---|---|
-| 0（思考关闭） | $9.65 | $16.32 | **$25.96** |
+| 0 (thinking off) | $9.65 | $16.32 | **$25.96** |
 | 250 | $17.33 | $31.69 | **$49.03** |
 | 500 | $25.02 | $47.07 | **$72.09** |
 | 1000 | $40.40 | $77.82 | **$118.21** |
-| 1500（默认假设） | $55.77 | $108.57 | **$164.34** |
+| 1500 (default assumption) | $55.77 | $108.57 | **$164.34** |
 | 2000 | $71.15 | $139.32 | **$210.46** |
 | 3000 | $101.90 | $200.82 | **$302.71** |
 
-同一个实验，预算可以是 $26 也可以是 $303——差 11.7 倍，**唯一的变量是一个
-Proposal 里从头到尾没提过的参数**。Opus 5 的 adaptive thinking 按输出 token 计费，
-而 `output_config.effort` 直接控制思考深度，所以 effort 档位（low/medium/high/
-xhigh/max）才是这个研究真正的成本旋钮。
+The same experiment costs anywhere from $26 to $303 — a factor of **11.7** — and **the only
+thing varying is a parameter the proposal never mentioned**. Claude Opus 5 bills adaptive
+thinking as output tokens, and `output_config.effort` controls thinking depth directly, so the
+effort level is the real cost dial for this study.
 
-## 发现 2：Proposal 里"user-agent 用 Haiku 4.5 省钱"这个取舍，几乎不影响预算
+## Finding 2: the proposal's "use Haiku 4.5 for the agents to save money" argument does not hold
 
-T2 每个 episode 的模型分摊（broker thinking=1500 假设下）：
+Per-episode cost split for T2 (under the thinking=1500 assumption):
 
-| ρ | Haiku 4.5 agents | Opus 5 broker |
+| rho | Haiku 4.5 agents | Opus 5 broker |
 |---|---|---|
-| 0.8 | 24 次调用，**$0.0136** | 22 次调用，**$0.9449** |
-| 1.2 | 38 次调用，**$0.0209** | 26 次调用，**$1.1232** |
-| 2.0 | 66 次调用，**$0.0366** | 34 次调用，**$1.4797** |
+| 0.8 | 24 calls, **$0.0136** | 22 calls, **$0.9449** |
+| 1.2 | 38 calls, **$0.0209** | 26 calls, **$1.1232** |
+| 2.0 | 66 calls, **$0.0366** | 34 calls, **$1.4797** |
 
-user-agent 那一侧占总成本的 **1.4%–2.4%**。Proposal §6.2 花了一整段讨论
-"agent 用 Haiku 是为控成本做的取舍，要不要改成全 Opus 5 由你定"，并把它列为
-需要教授拍板的事项之一——**这个决定实际上无关紧要**。即使把全部 user-agent
-换成 Opus 5，总预算增幅也远小于把 broker effort 从 high 调到 medium 带来的降幅。
+The user-agent side accounts for **1.4%–2.4%** of total cost. The proposal spent a paragraph
+on "agents use Haiku 4.5 as a cost tradeoff; switching to all-Opus 5 is a decision for the
+instructor" and listed it among the items needing sign-off. **That decision is close to
+irrelevant.** Even moving every user agent to Opus 5 would raise the total by far less than
+dropping the broker from `high` to `medium` effort would lower it.
 
-原因是 compact 场景下 broker 被调用的次数并不少：每个 10 分钟窗口 T2 要调
-broker 两次（tentative + final），一个 episode 有 ~17 个非空窗口，就是 ~34 次
-高 effort + 长上下文（全部车位清单 + 全部出价）的 Opus 5 调用。
+The reason is that the broker is called often at compact scale: T2 calls it twice per
+10-minute window (tentative, then final), so one episode involves roughly 34 high-effort,
+long-context Opus 5 calls. That, not the agent fleet, is the cost.
 
-## 三个真正有效的成本杠杆（按效果排序）
+## Three levers that actually work, in order of effect
 
-1. **调低 broker 的 `output_config.effort`**：从 high 降到 medium，按上表大致对应
-   从 $164 降到 $50–70 区间。这是唯一数量级级别的杠杆。需要做的是把 effort 当成
-   一个消融变量（Proposal §3.3 本来就写了要扫 effort ∈ {low, medium, high}），
-   先在 pilot 上确认低 effort 是否损害分配质量。
-2. **加大决策窗口**：从 10 分钟改成 30 分钟，broker 调用次数直接降到 1/3。
-   但这会改变实验语义（窗口越大，LLM 的批处理信息优势越大，见 README 里那条
-   已声明的不对称性），属于要谨慎权衡的设计变更，不是纯优化。
-3. **把车位清单放进缓存前缀**：目前 system prompt（稳定）走了 `cache_control`，
-   但每次 user message 里的车位清单（半稳定，只有空闲车道数在变）没有走缓存。
-   把清单的静态部分（id / 价格 / 容量 / EV 标记）挪进缓存前缀、只把动态的空闲
-   车道数留在尾部，可以省掉一部分输入 token。相对前两条是小头。
+1. **Lower the broker's `output_config.effort`.** Dropping from high to medium moves the total
+   from roughly $164 into the $50–70 range per the table above. This is the only
+   order-of-magnitude lever. It should be treated as an ablation variable — proposal §3.3
+   already specifies sweeping effort over {low, medium, high} — and the pilot should confirm
+   whether low effort degrades allocation quality before relying on it.
+2. **Widen the decision window.** Moving from 10 to 30 minutes cuts broker calls to a third.
+   But it changes the experiment's semantics (a wider window increases the LLM arms' batching
+   information advantage — see the asymmetry noted in the README), so this is a design change
+   to weigh carefully, not a free optimisation.
+3. **Move the spot menu into the cached prefix.** The system prompt (stable) already uses
+   `cache_control`, but the spot menu inside each user message (semi-stable — only free-lane
+   counts change) does not. Moving the static part of the menu (id, price, capacity, EV flag)
+   into the cached prefix and leaving only the dynamic free-lane counts at the tail would save
+   some input tokens. Smaller than the first two.
 
-Batch API 的 50% 折扣仍然适用且应该用，但它砍的是总额的一半，改变不了
-"broker thinking 决定一切"这个结构。
+The Batch API's 50% discount still applies and should be used, but it halves the total without
+changing the structural fact that broker thinking dominates it.
 
-## 对 Proposal 的修改建议
+## Recommended changes to the proposal
 
-§6.2 的成本表应该：
-- 把 broker effort / 思考 token 作为**表格的主轴**，而不是只给一个 $40–150 的区间；
-- 撤掉"user-agent 模型选择"作为待决策事项（改为脚注说明其成本占比 <3%）；
-- 把"全 Opus 5 约 $600"这个数字重算——它假设成本由 agent 侧主导，与实测结构不符。
+Section 6.2's cost table should:
+
+- make broker effort / thinking tokens the **main axis** of the table rather than quoting a
+  single $40–150 range;
+- drop "user-agent model choice" from the list of open decisions (a footnote stating that it
+  is under 3% of cost is enough);
+- recompute the "all-Opus 5, about $600" figure — it assumes the agent side dominates cost,
+  which the measurements contradict.

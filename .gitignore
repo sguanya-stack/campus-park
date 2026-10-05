@@ -18,3 +18,8 @@ deliverables/llm-allocation-study/runs/
 # generated — it is the console's source and stays tracked.)
 deliverables/*.html
 deliverables/llm-allocation-study/*.html
+# Earlier CampusPark report + UML deliverable: a different assignment, kept
+# out of this repo so deliverables/ contains only the allocation study.
+deliverables/uml/
+deliverables/campuspark_final.*
+deliverables/generate_pdf.py

@@ -76,7 +76,7 @@ TEMPLATE = """<!DOCTYPE html>
 </head>
 <body>
 {body}
-<div class="meta">由 {source} 生成于 {ts}　·　单文件、离线可读　·　浏览器中按 Cmd-P 可导出 PDF</div>
+<div class="meta">Generated from {source} on {ts} &middot; single file, readable offline &middot; press Cmd-P to export PDF</div>
 </body>
 </html>
 """

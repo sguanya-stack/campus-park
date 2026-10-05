@@ -1,77 +1,92 @@
-# Experiment A 的规模与样本量建议（基于实测方差）
+# Scale and sample size for Experiment A, from measured variance
 
-由 `harness/power_analysis.py` 与 `harness/estimate_cost.py` 生成，全部零成本。
-这份文档**更正了我此前的一个说法**，并给出跑主实验前应该定下的配置。
+Produced by `harness/power_analysis.py` and `harness/estimate_cost.py`, both free to run.
+This document **corrects a claim I made earlier** and sets out the configuration to fix before
+the main experiment runs.
+
+All numbers below were recomputed after Amendment A-2 (real OSM coordinates).
 
 ---
 
-## 更正：缩放验证证明的是"现象保住了"，不是"精度保住了"
+## Correction: the scale validation proves the phenomenon survives, not the precision
 
-`scale_validation.md` 显示 compact（cap=30）与全尺寸（cap=833）的策略排序在 6/6 个
-单元格全部保持、均值最大偏差 0.121。**那个结论只关于效应量与排序，不关于统计精度。**
-我此前把"可信代理"这句话说得太宽了。
+`scale_validation.md` shows strategy ordering preserved in 6/6 cells between the compact fleet
+(30 spaces) and the full fleet (833). **That result is about effect magnitude and ordering
+only — it says nothing about statistical precision.** I previously described the compact fleet
+as a "faithful proxy", which was too broad.
 
-实测的配对差标准差（fifo vs greedy，success_rate，ρ=1.2，n=30）：
+Measured paired-difference SD (fifo vs greedy, success_rate, rho=1.2, n=30):
 
-| 车队容量 | 请求/episode | 配对差 SD | MDE @ n=30 | 要检出 1pp 需要 n |
+| Fleet capacity | Requests/episode | Paired-diff SD | MDE @ n=30 | n needed for 1 pp |
 |---|---|---|---|---|
-| 30 | 36 | 0.0487 | **2.57 pp** | 188 |
-| 60 | 72 | 0.0542 | 2.87 pp | 232 |
-| 120 | 144 | 0.0339 | 1.80 pp | 92 |
-| 240 | 288 | 0.0313 | 1.66 pp | 79 |
-| 833 | 1000 | 0.0149 | **0.79 pp** | 19 |
+| 30 | 36 | 0.0567 | **3.00 pp** | 255 |
+| 60 | 72 | 0.0354 | 1.87 pp | 100 |
+| 120 | 144 | 0.0305 | 1.62 pp | 75 |
+| 240 | 288 | 0.0219 | 1.16 pp | 40 |
+| 833 | 1000 | 0.0129 | **0.68 pp** | 15 |
 
-原因很直接：每个 episode 的成功率本身是一个小样本比例估计，24–60 个请求时
-SE ≈ 0.10，而 666–1666 个请求时 SE ≈ 0.019。**为省钱缩小规模，代价是精度下降 3 倍以上。**
+The reason is direct: each episode's success rate is itself a small-sample proportion. With
+24–60 requests the standard error is about 0.10; with 666–1666 it is about 0.019. **Shrinking
+the fleet to save money costs more than a factor of four in precision.**
 
-> cap=60 那一行（0.0542 > cap=30 的 0.0487）是反常的，属于 SD 估计自身的噪声：
-> n=30 时 SD 的相对标准误约为 `1/sqrt(2(n-1))` ≈ 13%，足以解释这个倒挂。不要把它
-> 读成"规模变大反而更差"。
+## Variance has two components, and a larger episode only removes one
 
-## 方差有两个成分，大 episode 只能消掉其中一个
+Pure 1/sqrt(requests) scaling from the 30-space row would predict an SD of 0.0097 at 833
+spaces; the measured value is 0.0129. The measured values sit consistently above the
+prediction, which means part of the variance does **not** shrink as episodes grow — scenario
+variance, since different seeds generate genuinely different demand and supply configurations.
 
-纯 1/√(请求数) 缩放会预测 cap=240 的 SD 为 0.0172，实测是 0.0313；cap=833 预测
-0.0092，实测 0.0149。实测值系统性偏高，说明存在**不随 episode 变大而收缩的场景间方差**
-（不同种子生成的需求/车位构型本身就不同）。
+So **bigger episodes suppress sampling noise but not scenario variance.** Driving the MDE
+lower requires more seeds as well.
 
-结论：**加大 episode 能压掉抽样噪声，压不掉场景方差**；要继续降 MDE，必须同时增加种子数。
+## But bigger episodes are far more token-efficient
 
-## 但大 episode 在 token 上更划算
+Each decision window re-sends the spot menu (24 garages) and the system prompt. That fixed
+cost is independent of how many requests the window holds, so cost per request falls sharply
+as episodes grow:
 
-每个决策窗口都要重发一遍车位清单（24 个车位）与 system prompt，这部分固定开销与该窗口
-里有多少请求无关。所以 episode 越大，单请求成本越低：
-
-| 车队容量 | 请求/episode | \$/episode | **\$/请求** |
+| Fleet capacity | Requests/episode | $/episode | **$/request** |
 |---|---|---|---|
 | 30 | 36 | 0.587 | 0.0163 |
 | 60 | 72 | 0.793 | 0.0110 |
 | 120 | 144 | 0.908 | 0.0063 |
 | 240 | 288 | 1.047 | **0.0036** |
 
-从 cap=30 到 cap=240，请求数涨 8 倍，每 episode 成本只涨 1.8 倍，**单请求成本降 4.5 倍**。
+From 30 to 240 spaces: requests per episode rise 8x, cost per episode rises only 1.8x, so
+**cost per request drops 4.5x**.
 
-## 建议配置
+## Recommended configuration
 
-既然已明确不计成本，建议**放弃 cap=30**，改用下面两档之一：
+Given that cost is not the binding constraint, **do not use the 30-space fleet**:
 
-| 配置 | MDE（ρ=1.2, success_rate） | 估算预算（3 effort × 3 负载 × T1+T2） | Batch API 后 |
+| Configuration | MDE (rho=1.2, success_rate) | Estimated budget (3 efforts x 3 loads x T1+T2) | With Batch API |
 |---|---|---|---|
-| cap=30, n=30（原方案） | 2.57 pp | \$164 | \$82 |
-| cap=30, n=60 | 1.82 pp | \$329 | \$165 |
-| **cap=240, n=60（推荐）** | **~1.2 pp** | **\$553** | **~\$277** |
+| cap=30, n=30 (original plan) | 3.00 pp | $164 | $82 |
+| cap=30, n=60 | 2.12 pp | $329 | $165 |
+| **cap=240, n=60 (recommended)** | **~0.82 pp** | **$553** | **~$277** |
 
-推荐 cap=240 / n=60 的理由：
-1. MDE 降到约 1.2 pp，足以检出 LLM 与 Greedy 之间可能很细微的差异。**如果只用
-   cap=30/n=30（MDE 2.57 pp），一个 2 pp 的真实差异会被判为"不显著"，而那是个
-   无效结论而不是负面结论**——这两者在论文里价值完全不同。
-2. 每个 episode 288 个请求，协商场景本身也更真实（compact 下每窗口只有 1–4 个请求，
-   "多智能体协商"其实没什么可协商的）。
-3. 单请求成本只有 cap=30 的 1/4.5，钱花得更有效率。
+Why cap=240 / n=60:
 
-## 仍需你拍板的事
+1. An MDE near 0.8 pp is small enough to detect a subtle LLM-vs-Greedy difference. **At
+   cap=30/n=30 (MDE 3.00 pp) a real 2 pp difference would be reported as "not significant" —
+   which is a null result, not a negative one, and those are worth very different amounts in a
+   paper.**
+2. 288 requests per episode makes the negotiation scenario itself realistic. At the compact
+   scale a decision window holds 1–4 requests, so "multi-agent negotiation" has almost nothing
+   to negotiate over — which matters most for T2.
+3. Cost per request is a quarter of the compact fleet's, so the money buys more.
 
-- **effort 要扫哪几档**：上表按 3 档（low/medium/high）估算。若只跑 medium+high，预算减约 1/3。
-- **cap=240 还是 cap=120**：cap=120 的 MDE 约 1.8 pp（n=60 时约 1.3 pp），预算大致居中。
-- 注意：以上 MDE 全部来自**确定性策略**的方差，只含场景方差。LLM 臂会叠加模型自身随机性
-  （§5.3 的 ICC 就是为量化这个），所以真实 MDE 会比上表更大。**跑完 pilot 后应该用
-  LLM 自己的数据重跑一次 `power_analysis.py` 再最终定 n。**
+## What still needs a decision
+
+- **Which effort levels to sweep.** The table assumes three (low/medium/high). Running only
+  medium and high cuts roughly a third of the budget.
+- **cap=240 or cap=120.** The 120-space fleet gives an MDE near 1.15 pp at n=60, with a budget
+  between the two rows above.
+- **Every MDE here comes from deterministic policies, so it captures scenario variance only.**
+  The LLM arms add model jitter on top — which is exactly what the §5.3 repeated-measures ICC
+  exists to quantify — so the real MDE will be larger. **After the pilot, re-run
+  `harness/variance_analysis.py` on actual LLM data before fixing n.**
+- Amendment A-2 narrowed the greedy-vs-FIFO gap by 19–37%. If real geography compresses
+  differences between allocation strategies in general, the effect Experiment A is trying to
+  detect is smaller than originally assumed, which makes the point above more pressing rather
+  than less.

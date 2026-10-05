@@ -330,5 +330,3 @@ not merely a cost dial.
 
 All experiments are reproducible from seeds; every result in this report can be regenerated
 with the commands in each document.
-
-> A Chinese translation of this report is kept at `PROGRESS_REPORT_zh.md`.

@@ -1,320 +1,447 @@
-# Research Proposal — LLM 智能体协商式车位分配 vs. 传统贪心/FIFO 调度
+# Research Proposal — LLM Agent Negotiation vs. Greedy/FIFO Scheduling for Parking Allocation
 
-**作者**: Guanya Song (song.guany@northeastern.edu)
-**系统基座**: CampusPark（Node.js + Prisma + PostgreSQL，已有并发预订与动态定价模块）
-**日期**: 2026-09-21
-**状态**: Draft v1，待提交前自审
+**Author:** Guanya Song (song.guany@northeastern.edu)
+**System under study:** CampusPark (Node.js + Prisma + PostgreSQL, with existing concurrent
+reservation and dynamic pricing modules)
+**Date:** 2026-09-21 (revised as findings required)
+**Status:** Draft, self-reviewed before submission
 
 ---
 
-## 0. 一页摘要（提交给教授的版本）
+## 0. One-page summary
 
-**研究问题（一句话）**
-在真实价格与占用率数据校准的高并发车位分配场景中，基于 LLM 的多轮协商式智能体调度（multi-agent negotiation）相比传统贪心与先到先得（FIFO）调度，在**分配成功率**与**公平性**上是否存在统计学显著差异？
+**Research question (one sentence)**
+In a parking-allocation setting calibrated on real price and occupancy data under high
+contention, does LLM-driven multi-agent negotiation differ significantly from greedy and
+first-come-first-served (FIFO) scheduling in **allocation success rate** and **fairness**?
 
-**假设**
-- **H1（成功率）**：LLM 协商调度的请求满足率与 Greedy 无显著差异或更低（成本是延迟与 token 开销）。
-- **H2（公平性）**：LLM 协商调度的公平性指标（Jain's index / Gini）显著优于 Greedy 与 FIFO，因为它能进行跨用户的偏好交换（"你要 EV 桩，我只要便宜"）。
-- **H3（可靠性代价）**：LLM 调度会产生非零的**非法分配率**（双重占位、引用不存在车位、超时窗），这是传统算法结构上不可能出现的失败模式。
+**Hypotheses**
+- **H1 (success rate):** LLM negotiation's request-satisfaction rate is no better than Greedy's,
+  or is lower — the cost being latency and token spend.
+- **H2 (fairness):** LLM negotiation is significantly fairer (Jain's index / Gini) than Greedy
+  and FIFO, because it can trade preferences across users ("you want the EV charger, I only
+  want cheap").
+- **H3 (reliability cost):** LLM allocation produces a non-zero **illegal allocation rate**
+  (double bookings, references to nonexistent spots, time-window violations) — a failure mode a
+  classical algorithm structurally cannot exhibit.
 
-**对照组（Baseline，全部实现于同一仿真 harness）**
-| 代号 | 策略 | 作用 |
+**Baselines (all implemented in the same simulation harness)**
+
+| Code | Policy | Role |
 |---|---|---|
-| B0 | Random 随机分配 | 下界（sanity floor） |
-| B1 | FIFO 先到先得（= CampusPark 现网行为，原子事务扣减库存） | 生产基线 |
-| B2 | Greedy（按距离/价格效用最大化，单轮无协商） | 强算法基线 |
-| T1 | LLM **单轮**中央分配器（一次调用看到整批请求） | 消融组：隔离"LLM"与"协商"两个变量 |
-| T2 | LLM **多轮协商**（每用户一 agent + broker，R=3 轮） | 实验组（本研究的处理） |
+| B0 | Random allocation | Sanity floor |
+| B1 | FIFO (= CampusPark's current behaviour: atomic transactional inventory decrement) | Production baseline |
+| B2 | Greedy (utility-maximising over distance/price, single round, no negotiation) | Strong algorithmic baseline |
+| T1 | LLM **single-shot** central allocator (one call sees the whole batch) | Ablation: separates "LLM" from "negotiation" |
+| T2 | LLM **multi-round negotiation** (one agent per user plus a broker, R=3 rounds) | Treatment |
 
-**数据源**
-1. 已采集的真实数据 `parking_data.csv`：Parkopedia（Bellevue WA，1km 半径）**1104 条报价，24 个停车场，53 个时间快照**，覆盖 2026-03-20 13:20 → 2026-03-21 13:52，价格区间 \$4.49–\$37.10（中位数 \$8.74）。
-2. CampusPark 现有的小时需求曲线与占用率模型（`server.js:1759-1870`，morning-rush 0.90 / evening-rush 0.93 / midday 0.72 / off-peak 0.58）用于生成到达过程。
-3. 仿真器只用**静态 CSV**，不再继续抓取（见 §8 合规）。
+**Data sources**
+1. Already-collected real data, `parking_data.csv`: Parkopedia (Bellevue WA, 1 km radius) —
+   **1,104 quotes, 24 garages, 53 time snapshots**, covering 2026-03-20 13:20 → 2026-03-21
+   13:52, prices $4.49–$37.10 (median $8.74).
+2. Real coordinates for the same 1 km disc from OpenStreetMap (156 features, ODbL), frozen into
+   the repository.
+3. CampusPark's existing hourly demand curve and occupancy model (`server.js:1759-1870`:
+   morning-rush 0.90 / evening-rush 0.93 / midday 0.72 / off-peak 0.58) to generate the arrival
+   process.
+4. The simulator uses only **static snapshots** — the scraper is not re-run (see §8).
 
-**生成式 AI 技术深度**：多智能体协商协议、结构化输出约束（`strict` tool schema）、prompt caching 成本工程、在**不可设 temperature** 的前提下做方差分解——这些构成方法论主体，而非"调一个 API"。
+**Generative-AI depth:** the multi-agent negotiation protocol, structured-output constraints
+(`strict` tool schemas), prompt-caching cost engineering, and — given that **`temperature`
+cannot be set on current models** — a variance-decomposition methodology. These constitute the
+substance of the work, not a single API call.
 
-**可能的负面结果**：完全可能得出"LLM 调度在成功率上显著更差、延迟高 2–3 个数量级、单位分配成本高 10^4 倍，且公平性优势不显著"。该结论本身是可发表的负面结果，也是本设计刻意保留的失败空间。
+**Possible negative results:** it is entirely possible to conclude that LLM allocation has a
+significantly *worse* success rate, 2–3 orders of magnitude more latency, 10^4x the unit cost,
+and no significant fairness advantage. That conclusion is itself publishable, and the design
+deliberately preserves room for it.
 
-**预算**：约 **\$40–\$150** API 成本（见 §6），8 周完成。
-
----
-
-## 1. 方向选择与理由（对建议的回应）
-
-收到的建议给了两个方向。**方向二（动态定价基准测试）单独立项存在一个硬伤：它完全没有生成式 AI 成分。** "规则定价 vs 随机基线 vs 静态定价"是一个纯离散事件仿真 + 假设检验的作业，技术深度不在 GenAI 上。
-
-因此本 Proposal 采取：
-
-- **主实验（Experiment A）= 方向一**：LLM 多智能体协商分配 vs Greedy/FIFO。GenAI 深度在此。
-- **次实验（Experiment B）= 方向二**：定价策略对利用率的影响。**复用同一个仿真 harness**，边际成本几乎为零，且为主实验提供一个"传统算法也能做严谨基准"的对照叙事。
-
-两者共享 harness 是关键——不是硬凑两个题目，而是同一个仿真器换掉策略插槽。
-
----
-
-## 2. 背景与空白
-
-CampusPark 现网已经具备三个可测量的机制，这是本研究能落地的前提：
-
-1. **原子并发预订**（`test-concurrency.js`、`scripts/load-test-reserve.js`）：Prisma 事务内先查库存再 `decrement`，10 个并发请求抢 1 个车位 → 恰好 1 成功。这就是 **B1 (FIFO)** 的真实实现，不是稻草人。
-2. **规则式动态加价**（`server.js:574`）：`demandSearchCount > 20` 时 `surgeMultiplier = 1.5`，否则 1.0。这是 Experiment B 的被测策略。
-3. **占用率仿真**（`server.js:1759`）：小时需求曲线 × 场地偏置 × 正弦扰动 + jitter，clamp 到 [0.02, 0.98]。
-
-**空白**：现有文献里 LLM 用于资源分配多停留在"能不能做"的可行性演示，缺少与强算法基线（不只是 random）在**同一仿真环境、同一随机种子、同一指标族**下的受控比较，尤其缺少对 LLM 特有失败模式（非法分配）的量化。本研究填这个空。
+**Budget:** see §6.2. The figure depends almost entirely on one parameter the original draft
+never mentioned.
 
 ---
 
-## 3. 实验设计
+## 1. Direction and rationale
 
-### 3.1 因子设计（Experiment A）
+Two directions were suggested. **Direction 2 (a dynamic-pricing benchmark) has a hard flaw as a
+standalone project: it contains no generative AI at all.** "Rule-based pricing vs. random
+baseline vs. static pricing" is a discrete-event simulation and hypothesis-testing exercise;
+its technical depth is not in GenAI.
 
-**2 因子 × 重复测量**
+So this proposal takes:
 
-- **因子 1 — 策略**（5 水平）：B0, B1, B2, T1, T2
-- **因子 2 — 负载**（3 水平）：需求/供给比 ρ ∈ {0.8（供过于求）, 1.2（略紧）, 2.0（严重争抢）}
-- **每格 episode 数**：n = 30（种子 1..30，**跨策略共用同一组种子** → 配对设计，大幅降低方差）
-- 总计 5 × 3 × 30 = 450 个 episode，其中 LLM episode 180 个
+- **Primary experiment (Experiment A) = Direction 1**: LLM multi-agent negotiation vs.
+  Greedy/FIFO. The GenAI depth lives here.
+- **Secondary experiment (Experiment B) = Direction 2**: the effect of pricing policy on
+  utilization, **reusing the same simulation harness**, so its marginal cost is near zero while
+  providing a "classical algorithms can also be benchmarked rigorously" counterpoint.
 
-**一个 episode 的定义**：一个 3 小时的高峰窗口，24 个停车场（来自真实 CSV 的容量与价格），按 Poisson 到达过程生成 N 个请求；每个请求带 `(到达时间, 时长, 步行容忍距离, 价格敏感度, 是否需要 EV, 保留效用 u_min)`。策略在每个 10 分钟决策窗内对待分配队列做出分配。
+Sharing the harness is the point — these are not two bolted-together topics but the same
+simulator with a different policy slot.
 
-### 3.2 智能体协议（T2 的核心）
+---
+
+## 2. Background and the gap
+
+CampusPark already has three measurable mechanisms in production, which is what makes this
+study tractable:
+
+1. **Atomic concurrent reservation** (`test-concurrency.js`, `scripts/load-test-reserve.js`): a
+   Prisma transaction checks inventory then `decrement`s; 10 concurrent requests for 1 spot
+   yield exactly 1 success. This is the real implementation of **B1 (FIFO)** — not a straw man.
+2. **Rule-based dynamic surcharge** (`server.js:574`): `demandSearchCount > 20` sets
+   `surgeMultiplier = 1.5`, otherwise 1.0. This is the policy under test in Experiment B.
+3. **Occupancy simulation** (`server.js:1759`): hourly demand curve x site bias + sinusoidal
+   perturbation + jitter, clamped to [0.02, 0.98].
+
+**The gap:** existing work on LLMs for resource allocation largely stops at feasibility
+demonstrations. What is missing is a controlled comparison against a *strong* algorithmic
+baseline (not merely random) in the same simulated environment, with the same random seeds and
+the same metric family — and above all, quantification of the failure modes unique to LLMs
+(illegal allocations). This study fills that gap.
+
+---
+
+## 3. Experimental design
+
+### 3.1 Factorial design (Experiment A)
+
+**Two factors, repeated measures**
+
+- **Factor 1 — policy** (5 levels): B0, B1, B2, T1, T2
+- **Factor 2 — load** (3 levels): demand/supply ratio rho in {0.8 (oversupply), 1.2 (tight),
+  2.0 (heavy contention)}
+- **Episodes per cell:** n = 30 (seeds 1..30, **the same seed set shared across policies**, so
+  the design is paired and variance drops sharply)
+- Total 5 x 3 x 30 = 450 episodes, of which 180 are LLM episodes
+
+(The frozen configuration in `PRE_REGISTRATION.md` revises these numbers upward after measured
+power analysis: 240-space fleet, n=60 main grid.)
+
+**Definition of an episode:** a 3-hour peak window across 24 garages (capacities and prices
+derived from the real CSV), with N requests generated by a Poisson arrival process; each request
+carries `(arrival time, duration, walk tolerance, price sensitivity, EV requirement, reservation
+utility u_min)`. Each policy allocates the pending queue within each 10-minute decision window.
+
+### 3.2 Agent protocol (the core of T2)
 
 ```
-Round 1: 每个 user-agent 提交结构化 bid
+Round 1: each user-agent submits a structured bid
          { spot_preferences: [...], max_price, flexibility: {time_shift_min, walk_extra_m} }
-Round 2: broker 发布暂定分配 + 冲突集；落选 agent 可 (a) 提高让步 (b) 退出
-Round 3: broker 发布最终分配
-硬约束由代码强制校验（不信任模型输出）：容量、时间窗不重叠、EV 需求匹配
+Round 2: the broker publishes a tentative allocation plus the conflict set; losing agents may
+         (a) concede further or (b) withdraw
+Round 3: the broker publishes the final allocation
+Hard constraints are enforced in code, never trusted to the model: capacity, non-overlapping
+time windows, EV requirement matching
 ```
 
-- 每个 agent 的输出用 **structured outputs**（`output_config.format`）或 `strict: true` 的 tool schema 约束，保证可解析；解析失败计入 `parse_failure_rate` 而非静默重试。
-- broker 的分配结果**必须过一遍代码校验器**。违反硬约束的分配被拒绝并记为 `invalid_allocation`（H3 的因变量），然后回退到该轮的上一个合法状态——**不修补、不重试**，否则会把 LLM 的失败模式洗掉。
+- Each agent's output is constrained by **structured outputs** (`output_config.format`) or a
+  `strict: true` tool schema, guaranteeing parseability; parse failures count toward
+  `parse_failure_rate` rather than being silently retried.
+- The broker's allocation **must pass a code validator**. Allocations violating hard constraints
+  are rejected and recorded as `invalid_allocation` (the dependent variable for H3), then rolled
+  back to that round's last legal state — **no patching, no retrying**, since either would wash
+  the LLM's failure mode out of the data.
 
-### 3.3 消融（Ablation）
+### 3.3 Ablation
 
-T1 vs T2 隔离"协商"的贡献；此外对 T2 做两个单因素扫描：
-- 协商轮数 R ∈ {1, 2, 3, 5}
-- 推理预算 `output_config.effort` ∈ {low, medium, high}
+T1 vs T2 isolates the contribution of *negotiation*. In addition, two single-factor sweeps over
+T2:
+- negotiation rounds R in {1, 2, 3, 5}
+- reasoning budget `output_config.effort` in {low, medium, high}
 
 ---
 
-## 4. 因变量（指标族）
+## 4. Dependent variables (the metric family)
 
-| 指标 | 定义 | 对应假设 |
+| Metric | Definition | Hypothesis |
 |---|---|---|
-| **分配成功率** | 满足的请求 / 总请求（primary） | H1 |
-| **公平性 — Jain's index** | (Σuᵢ)² / (n·Σuᵢ²)，uᵢ = 用户 i 的实现效用 | H2（primary） |
-| **公平性 — Gini** | 效用分布基尼系数 | H2（robustness） |
-| **最差十分位效用** | 底部 10% 用户的平均效用 | H2（谁被牺牲） |
-| **社会福利** | Σ 实现效用（效用 = u_min 与实际匹配度的函数） | 次要 |
-| **车位利用率** | 已占用车位·小时 / 总容量车位·小时 | 次要 / Exp B primary |
-| **非法分配率** | 违反硬约束的分配 / 总分配 | **H3（LLM 独有）** |
-| **决策延迟** | p50 / p95 单决策窗墙钟时间 | 可部署性 |
-| **单位分配成本** | USD / 成功分配（由 `response.usage` 实测计算） | 可部署性 |
+| **Success rate** | satisfied requests / total requests (primary) | H1 |
+| **Fairness — Jain's index** | (sum u_i)^2 / (n * sum u_i^2), u_i = realized utility of user i | H2 (primary) |
+| **Fairness — Gini** | Gini coefficient of the utility distribution | H2 (robustness) |
+| **Worst-decile utility** | mean utility of the bottom 10% of users | H2 (who gets sacrificed) |
+| **Social welfare** | sum of realized utility | Secondary |
+| **Spot utilization** | occupied space-hours / total capacity space-hours | Secondary / Exp B primary |
+| **Illegal allocation rate** | allocations violating a hard constraint / total allocations | **H3 (LLM-specific)** |
+| **Decision latency** | p50 / p95 wall-clock per decision window | Deployability |
+| **Unit allocation cost** | USD per successful allocation, computed from measured `response.usage` | Deployability |
 
-**主指标预先声明**：成功率 + Jain's index。其余进 secondary family，统一做 Holm–Bonferroni 校正。这一条必须写进 proposal——否则是 p-hacking。
-
----
-
-## 5. 统计方法
-
-### 5.1 检验策略
-
-- **主检验**：配对设计下对每个负载水平做 T2 vs B2 的 **Welch t-test**（成功率）与 **Wilcoxon signed-rank**（Jain's index，有界非正态）。报告 **Cohen's d / Cliff's delta + 95% bootstrap CI**（10,000 次重抽样），而不是只报 p 值。
-- **交互作用**：two-way ANOVA（策略 × 负载），检验"LLM 的优势是否只在高争抢时出现"——这是最有意思的假设。
-- **多重比较**：主指标族内 Holm–Bonferroni（α = 0.05 family-wise）。
-- **非法分配率**：单侧精确二项检验 vs H₀ = 0（传统算法的结构性零）。
-
-### 5.2 检验力分析（Power）
-
-双样本 t-test，α = 0.05，power = 0.80：
-- n = 30/格 → 可检出 **d ≥ 0.74**（中大效应）
-- n = 64/格 → 可检出 d ≥ 0.50
-
-配对/共种子设计会把有效方差进一步压低。**做法**：先跑 n = 5 的 pilot 估计 episode 间方差，再回算所需 n；若 pilot 显示效应小于 d = 0.74，把 LLM 臂扩到 n = 60（增量成本约 \$30，见 §6）。非 LLM 臂（B0/B1/B2）计算几乎免费，直接跑 n = 200 以获得精确的基线分布。
-
-### 5.3 LLM 随机性——本研究必须正面处理的方法论问题
-
-**当前 Claude 模型已移除采样参数**：`temperature` / `top_p` / `top_k` 在 `claude-opus-5` 与 `claude-sonnet-5` 上会返回 **400 错误**（只有 `claude-haiku-4-5` 等旧代模型仍接受）。也就是说 **"设 temperature=0 求可复现"这条传统做法在本研究中不可用**。
-
-这不是障碍，而是设计约束，处理方式：
-
-1. **把模型随机性当作随机效应**，而不是假装它不存在：每个 (策略, 负载, 种子) 组合**重复 3 次**（同一场景、同一 prompt），做**方差分解**，报告 **ICC**（组内相关系数）——即"同一场景下模型自身抖动占总方差的比例"。
-2. 用 **linear mixed-effects model**：`metric ~ strategy * load + (1 | seed)`，把场景作为随机截距。
-3. 场景生成侧**完全可复现**（固定 PRNG 种子），把不可复现性严格隔离在模型调用一层。
-4. 固定并记录：精确模型 ID（`claude-opus-5`，不带日期后缀）、`output_config.effort`、prompt 全文 hash、SDK 版本。
-
-**这一条本身就是一个可写进论文的贡献**：在无法控制采样温度的新一代模型上，如何做可信的重复实验。
+**Primary metrics declared in advance:** success rate plus Jain's index. Everything else forms a
+secondary family with Holm–Bonferroni correction applied separately. This declaration must be
+part of the proposal — otherwise there is no defence against p-hacking.
 
 ---
 
-## 6. 实现与预算
+## 5. Statistical methods
 
-### 6.1 架构
+### 5.1 Testing strategy
+
+- **Primary tests:** given the paired design, **Welch t-test** for success rate and **Wilcoxon
+  signed-rank** for Jain's index (bounded, non-normal), for T2 vs B2 at each load level.
+  Report **Cohen's d / Cliff's delta with 95% bootstrap CIs** (10,000 resamples), not p-values
+  alone.
+- **Interaction:** two-way ANOVA (policy x load), testing whether "the LLM's advantage appears
+  only under heavy contention" — the most interesting hypothesis here.
+- **Multiple comparisons:** Holm–Bonferroni within the primary metric family (family-wise
+  alpha = 0.05).
+- **Illegal allocation rate:** one-sided exact binomial test against H0 = 0, the structural zero
+  of classical algorithms.
+
+### 5.2 Power analysis
+
+Two-sample t-test, alpha = 0.05, power = 0.80:
+- n = 30/cell detects **d >= 0.74** (a medium-to-large effect)
+- n = 64/cell detects d >= 0.50
+
+The paired / shared-seed design reduces effective variance considerably further. **Approach:**
+run an n = 5 pilot to estimate between-episode variance, then back out the required n; if the
+pilot suggests an effect smaller than d = 0.74, expand the LLM arms to n = 60 (about $30 more,
+per §6). The non-LLM arms (B0/B1/B2) are essentially free to compute, so they are run at n = 200
+to obtain precise baseline distributions.
+
+> Measured outcome: this was carried out, and the result was that the *two-sample* formula above
+> understates the paired design's sensitivity. See `results/design_recommendation.md` — the
+> frozen configuration uses a larger fleet (240 spaces) at n=60, where the measured MDE is
+> 0.52–0.95 pp.
+
+### 5.3 LLM stochasticity — the methodological problem this study must confront directly
+
+**Current Claude models have removed the sampling parameters:** `temperature` / `top_p` /
+`top_k` return a **400 error** on `claude-opus-5` and `claude-sonnet-5` (only older-generation
+models such as `claude-haiku-4-5` still accept them). That means **"set temperature=0 for
+reproducibility" is unavailable to this study**.
+
+This is a design constraint rather than an obstacle, handled as follows:
+
+1. **Treat model stochasticity as a random effect** instead of pretending it does not exist:
+   repeat each (policy, load, seed) combination **3 times** (same scenario, same prompt) and
+   perform a **variance decomposition**, reporting the **ICC** — the share of total variance
+   attributable to the model's own jitter on an identical scenario.
+2. Use a **linear mixed-effects model**: `metric ~ strategy * load + (1 | seed)`, treating the
+   scenario as a random intercept.
+   > Amendment A-1 in `PRE_REGISTRATION.md` corrects this: the correct grouping for this design
+   > is `(1 | rho:seed)`, because `generate_requests` redraws per load level. Both are reported.
+3. The scenario side is **fully reproducible** (fixed PRNG seeds), isolating irreproducibility
+   strictly to the model-call layer.
+4. Fix and record: the exact model ID (`claude-opus-5`, with no date suffix),
+   `output_config.effort`, a hash of the full prompt, and the SDK version.
+
+**This is itself a contribution worth writing up:** how to run credible repeated experiments on
+a new generation of models where sampling temperature cannot be controlled.
+
+---
+
+## 6. Implementation and budget
+
+### 6.1 Architecture
 
 ```
 harness/
-  scenario.py      # 种子 → episode（从 parking_data.csv 采样容量/价格，Poisson 到达）
+  scenario.py      # seed -> episode (capacities/prices sampled from parking_data.csv, Poisson arrivals)
   policies/
-    random.py  fifo.py  greedy.py          # B0 B1 B2（纯 Python，无 API 调用）
+    random.py  fifo.py  greedy.py          # B0 B1 B2 (pure Python, no API calls)
     llm_central.py                          # T1
-    llm_negotiate.py                        # T2：broker + user-agents
-  validator.py     # 硬约束校验器（不信任模型输出）
-  metrics.py       # §4 全部指标
-  analyze.R / analyze.py  # §5 统计
-  runs/            # 每个 episode 的完整 JSONL 日志（prompt / 响应 / usage / 决策）
+    llm_negotiate.py                        # T2: broker + user-agents
+  validator.py     # hard-constraint validator (does not trust model output)
+  metrics.py       # the full metric family from §4
+  analyze.py       # the statistics from §5
+  runs/            # full JSONL log per episode (prompt / response / usage / decisions)
 ```
 
-Python + `anthropic` SDK。协商循环用手写 loop（控制流固定 3 轮，不需要 agentic tool runner）。
+Python plus the `anthropic` SDK. The negotiation loop is hand-written (control flow is fixed at
+3 rounds, so an agentic tool runner is unnecessary).
 
-### 6.2 模型选择与成本
+### 6.2 Model choice and cost
 
-| 角色 | 模型 | 价格（\$/MTok in / out） |
-|---|---|---|
-| broker（中央协调，需要推理） | `claude-opus-5` | 5.00 / 25.00 |
-| user-agent（30 个并行，任务简单） | `claude-haiku-4-5` | 1.00 / 5.00 |
+Recomputed offline with the implemented harness — see
+[llm-allocation-study/results/cost_analysis.md](llm-allocation-study/results/cost_analysis.md).
+Scope: compact scenario, 24/36/60 requests x 3 loads x n=30 seeds, both LLM arms (T1+T2).
 
-**成本估算**（已用实现好的 harness 离线实测重算，见
-[llm-allocation-study/results/cost_analysis.md](llm-allocation-study/results/cost_analysis.md)；
-口径：compact 场景 24/36/60 请求 × 3 负载 × n=30 seeds × (T1+T2) 两个臂全跑完）
+**The main axis is not model choice; it is the broker's reasoning depth.** Opus 5 bills adaptive
+thinking as output tokens, and `output_config.effort` controls it directly:
 
-**主轴不是模型选择，是 broker 的思考深度**——Opus 5 的 adaptive thinking 按输出 token
-计费，而 `output_config.effort` 直接控制它：
-
-| broker 每次调用的思考 token | T1 小计 | T2 小计 | **全网格总计** |
+| Broker thinking tokens per call | T1 subtotal | T2 subtotal | **Grid total** |
 |---|---|---|---|
-| 0（思考关闭） | \$9.65 | \$16.32 | **\$25.96** |
-| 500 | \$25.02 | \$47.07 | **\$72.09** |
-| 1500 | \$55.77 | \$108.57 | **\$164.34** |
-| 3000 | \$101.90 | \$200.82 | **\$302.71** |
+| 0 (thinking off) | $9.65 | $16.32 | **$25.96** |
+| 500 | $25.02 | $47.07 | **$72.09** |
+| 1500 | $55.77 | $108.57 | **$164.34** |
+| 3000 | $101.90 | $200.82 | **$302.71** |
 
-同一个实验预算可以是 \$26 也可以是 \$303，相差 11.7 倍。再叠加 Batch API 的 50% 折扣可
-再砍一半。**因此 effort 档位必须作为预注册的一部分先定下来**（§3.3 的 effort 消融扫描
-正好覆盖这件事，应在 pilot 阶段先确认低 effort 是否损害分配质量）。
+The same experiment can cost $26 or $303 — a factor of 11.7 — and the Batch API's 50% discount
+halves whichever figure applies. **The effort level must therefore be fixed as part of the
+pre-registration** (the §3.3 effort ablation covers exactly this, and the pilot should first
+confirm whether low effort degrades allocation quality).
 
-成本工程手段（本身也是 GenAI 工程深度的一部分）：
-- **broker `effort` 档位**：唯一的数量级杠杆，见上表。
-- **Batch API**：仿真非实时，走批处理 **50% 折扣**。注意批结果**返回顺序任意**，按 `custom_id` 索引。
-- **Prompt caching**：协商协议与规则说明是稳定前缀 → 缓存命中部分约 0.1× 价格。目前实现
-  只缓存了 system prompt；车位清单的静态部分（id/价格/容量/EV）还在每次 user message 里重发，
-  应挪进缓存前缀、只把动态的空闲车道数留在尾部。必须用 `usage.cache_read_input_tokens` 验证
-  命中，为零说明前缀里混了时间戳之类的隐形失效源。
+Cost-engineering levers (themselves part of the GenAI engineering depth):
+- **Broker `effort` level:** the only order-of-magnitude lever, per the table above.
+- **Batch API:** the simulation is not latency-sensitive, so batch processing gives a **50%
+  discount**. Note that batch results return in **arbitrary order** — index by `custom_id`.
+- **Prompt caching:** the negotiation protocol and rule text are a stable prefix, so cache hits
+  cost about 0.1x. The current implementation caches only the system prompt; the static part of
+  the spot menu (id/price/capacity/EV) is still re-sent in every user message and should be
+  moved into the cached prefix, leaving only the dynamic free-lane counts at the tail. Verify
+  hits with `usage.cache_read_input_tokens` — a zero means a silent invalidator such as a
+  timestamp is in the prefix.
 
-**原先"user-agent 用 Haiku 4.5 省钱"的论证已被实测推翻**：user-agent 侧只占 T2 总成本的
-**1.4%–2.4%**（每 episode \$0.01–0.04，而 broker 侧 \$0.94–1.48）。compact 场景下 broker
-每个 10 分钟窗口要被调用两次（tentative + final），一个 episode ~34 次高 effort、长上下文的
-Opus 5 调用，这才是成本主体。所以"agent 要不要也用 Opus 5"**不再是一个需要教授拍板的预算
-问题**——即使全换成 Opus 5，增幅也远小于把 broker effort 从 high 调到 medium 的降幅。
+**The original argument for "use Haiku 4.5 for user agents to save money" has been refuted by
+measurement:** the user-agent side is only **1.4%–2.4%** of T2's cost ($0.01–0.04 per episode,
+versus $0.94–1.48 for the broker). At compact scale the broker is called twice per 10-minute
+window (tentative, then final), so one episode involves roughly 34 high-effort, long-context
+Opus 5 calls — that is where the money goes. So "should the agents also use Opus 5" is **no
+longer a budget question worth an instructor's time**: even switching all of them would raise
+the total by far less than dropping broker effort from high to medium would lower it.
 
-### 6.3 Experiment B（定价基准，复用 harness）
+### 6.3 Experiment B (pricing benchmark, reusing the harness)
 
-被测策略插到同一个 harness 的定价插槽（分配器固定为 Greedy，只有价格在变）：
-- P0 静态定价（CSV 原始价）
-- P1 现网规则加价（`server.js:574` 的 ×1.5，在仿真里改写为尺度无关的"需求 > 空闲车道"触发）
-- P2 **置换对照**：施加与 P1 **数量完全相同**的 ×1.5，但随机撒到别的车位上
-- P3（可选，GenAI 延伸）LLM 定价器 —— 未实现
+Policies plugged into the same harness's pricing slot (the allocator is held fixed at Greedy, so
+only price varies):
+- P0 static pricing (original CSV prices)
+- P1 the production rule surcharge (`server.js:574`'s x1.5, rewritten in the simulation as a
+  scale-free "demand > free lanes" trigger)
+- P2 **permutation control**: the **same number** of x1.5 surcharges as P1, relocated to
+  randomly chosen spots
+- P3 (optional GenAI extension) an LLM pricer — not implemented
 
-主指标：车位利用率。设计与统计同 §5。
+Primary metric: spot utilization. Design and statistics as in §5.
 
-**关于 P2 的实现修正**：原方案写的是"随机乘数 U[1.0,1.5]，与 P1 同均值"。但 U[1.0,1.5]
-的均值是 1.25，只有当 P1 恰好 50% 触发时两者才同均值——而触发率是未知的。实现时改成
-**复用 P1 在同一窗口的实际加价次数并置换其位置**，这样边际价格分布按构造完全一致，
-唯一变量就是"有没有瞄准争抢车位"，在任何触发率下都成立。
+**Correction to P2's implementation.** The original plan specified "a random multiplier
+U[1.0,1.5], matched on mean to P1". But U[1.0,1.5] has a mean of 1.25, which equals P1's mean
+only if the surge fires exactly 50% of the time — and the trigger rate is unknown. The
+implementation instead **re-uses P1's actual surcharge count in the same window and permutes its
+placement**, making the marginal price distribution identical by construction and leaving
+"whether contested spots were targeted" as the only variable, at any trigger rate.
 
-### ✅ Experiment B 已完成（270 episode，n=30/格）
+### Experiment B is complete (270 episodes, n=30/cell)
 
-完整结果：[pricing_findings.md](llm-allocation-study/results/pricing_findings.md)。三条结论：
+Full results:
+[pricing_findings.md](llm-allocation-study/results/pricing_findings.md). Three conclusions:
 
-1. **生产规则没有提升利用率，而是显著降低了**（ρ=2.0 时 −3.79%，d=−3.58，p=2.9e−18），
-   且争抢越严重损失越大。这是预先声明的主指标上的**负面结果**。
-2. **收益主要来自瞄准，不来自涨价**：P1 在与 P2 平均乘数相同的条件下，收入高 +5.94%
-   （ρ=2.0，d=+3.98，p=1.6e−19）。
-3. ~~不瞄准的涨价一分钱赚不到~~ —— **该结论未通过敏感性检验，已降级**，见下。
+1. **The production rule does not raise utilization — it significantly lowers it** (−3.79% at
+   rho=2.0, d=−3.58, p=2.9e−18), with losses growing in contention. This is a **negative result
+   on the pre-registered primary metric**.
+2. **The revenue gain comes mainly from targeting, not from raising prices:** at matched average
+   multipliers, P1 earns **+5.94%** more than P2 (rho=2.0, d=+3.98, p=1.6e−19).
+3. **Untargeted increases capture no revenue** — P2 charged 13.8% more on average and revenue
+   **fell 0.78%** (p=0.008) — **but this one carries a boundary condition**, see below.
 
-**§7 要求的效用参数敏感性扫描已完成**（价格敏感度 5 档，同时变动水平与离散度，
-[pricing_sensitivity.md](llm-allocation-study/results/pricing_sensitivity.md)）：
+**The utility-parameter sensitivity sweep required by §7 is complete** (5 price-sensitivity
+settings varying level and spread independently,
+[pricing_sensitivity.md](llm-allocation-study/results/pricing_sensitivity.md)):
 
-| 结论 | 一致档数 | 处理 |
+| Conclusion | Settings consistent | Disposition |
 |---|---|---|
-| ① 利用率下降 | **5/5**，且量级随敏感度单调 | 可无条件报告 |
-| ② 瞄准比随机加价更赚钱 | 4/5 | 报告时带边界条件（高敏感且同质人群下失效） |
-| ③ 随机涨价无收益 | **2/5，翻转** | 降级为"基线假设下的观察"，不作为结论 |
+| 1. Utilization drops | **5/5**, magnitude monotone in elasticity | Report unconditionally |
+| 2. Targeting beats random surcharges | 4/5 | Report with a boundary condition (fails for a uniformly highly price-sensitive population) |
+| 3. Untargeted increases capture nothing | 4/5 under the stated decision rule | Report with the qualifier that it fails for genuinely price-insensitive demand |
 
-结论③ 翻转的机制很清楚：**水平**决定涨价损失多少量，**离散度**决定还能否从不敏感的尾巴
-上榨到剩余。在**同样的平均弹性 2.0** 下，同质人群 −2.14%、离散很大的人群 +0.07%。
-基线设定恰好落在翻转点附近——这正是单点参数设定不足以支撑结论的教科书式案例。
+The mechanism behind conclusion 3's boundary is clear: **level** decides how much volume an
+increase destroys, **spread** decides whether surplus can still be taken from an insensitive
+tail. At the **same mean elasticity of 2.0**, the homogeneous population loses 2.14% while the
+highly heterogeneous one captures nothing at all.
 
-即便如此，P2 这个对照组依然是必需的：没有它，只跑 P0 vs P1 会得到"动态定价提升收入
-6.15%"并归因于价格；有了它才能把"涨价"和"瞄准"拆开，而拆开后的**结论②比结论③稳健得多**。
+Either way the permutation control earned its place: without it, running only P0 vs P1 would
+have produced "dynamic pricing raises revenue 6.15%" attributed to price — and once separated,
+**conclusion 2 proves considerably more robust than conclusion 3**.
 
 ---
 
-## 7. 有效性威胁（Threats to Validity）
+## 7. Threats to validity
 
-**必须在 proposal 里主动写出来，而不是等评审指出。**
+**These must be stated proactively in the proposal, not waited for from a reviewer.**
 
-| 威胁 | 严重度 | 缓解 |
+| Threat | Severity | Mitigation |
 |---|---|---|
-| **数据量薄**：只有 24 个场地、约 24.5 小时、53 个快照 | 高 | 不声称超出 Bellevue 的外部效度；用 bootstrap 重抽样扩展场景；对需求曲线形状做敏感性分析 |
-| **仿真器就是我自己写的** → 可能无意中偏向某策略 | 高 | 策略与仿真器严格解耦（插槽式）；先冻结仿真器与种子，再实现策略；公开全部代码与日志 |
-| **用户效用函数是我设定的** | 高 | ✅ **已执行**（Exp B，5 档价格敏感度，同时变动水平与离散度）。结果：1 条结论翻转并已降级，见 §6.3。Exp A 跑完后需对其效用参数做同样处理 |
-| **LLM 不可复现**（无 temperature 控制） | 中 | §5.3 的重复测量 + 方差分解 + ICC |
-| **Prompt 敏感性**：结论可能是 prompt 工程的产物 | 中 | 主实验前用 pilot 固定 prompt 并冻结；额外跑 2 个改写版 prompt 作为鲁棒性检查 |
-| **模型版本漂移** | 中 | 固定模型 ID，记录每次调用的 `response.model` 与 `_request_id` |
-| **成功率/公平性的 trade-off 不可避免** | 低 | 预先声明双主指标，不做事后择优 |
+| **Thin data:** 24 garages, ~24.5 hours, 53 snapshots | High | Claim no external validity beyond Bellevue; bootstrap-resample to extend scenarios; sensitivity analysis over demand-curve shape |
+| **I wrote the simulator**, so it could unintentionally favour a policy | High | Policies and simulator are strictly decoupled (slot-based); the simulator and seeds were frozen before policies were implemented; all code and logs are published |
+| **I set the user utility function** | High | ✅ **Done** (Exp B, 5 price-sensitivity settings varying level and spread). One conclusion acquired a boundary condition as a result, see §6.3. The same treatment is required for Exp A's utility parameters once it runs |
+| **LLM irreproducibility** (no temperature control) | Medium | §5.3's repeated measures + variance decomposition + ICC |
+| **Prompt sensitivity:** conclusions could be an artifact of prompt engineering | Medium | Fix and freeze prompts via a pilot before the main run; additionally run 2 paraphrased prompts as a robustness check |
+| **Model version drift** | Medium | Pin the model ID; record `response.model` and `_request_id` for every call |
+| **The success-rate/fairness tradeoff is unavoidable** | Low | Declare both primary metrics in advance; no post-hoc selection |
 
 ---
 
-## 8. 合规与可复现
+## 8. Compliance and reproducibility
 
-- **数据**：`parking_data.csv` 为已采集的公开报价数据，**无个人信息**。研究阶段只用静态快照，`parking.py` 抓取器不再运行——它命中的是 Parkopedia 的内部 API，持续抓取的 ToS 风险不值得为一个课程项目承担。这一点写进 proposal 的 limitations。
-- **可复现包**：种子、prompt 全文、模型 ID、全部 episode JSONL 日志、分析脚本一并提交。
-- **成本透明**：从 `response.usage` 实测记录每个 episode 的 token 与美元成本，作为结果的一部分报告。
+- **Data:** `parking_data.csv` is already-collected public quote data containing **no personal
+  information**. The research phase uses only static snapshots; the `parking.py` scraper is not
+  re-run — it hits Parkopedia's internal API, and the ToS risk of continued scraping is not
+  worth carrying for a course project. This is stated in the proposal's limitations.
+  OpenStreetMap data is ODbL-licensed and frozen into the repository.
+- **Reproducibility package:** seeds, full prompts, model IDs, all per-episode JSONL logs, and
+  the analysis scripts are submitted together.
+- **Cost transparency:** per-episode token and dollar cost are measured from `response.usage`
+  and reported as part of the results.
 
 ---
 
-## 9. 时间线（8 周，起始 2026-09-21）
+## 9. Timeline (8 weeks from 2026-09-21)
 
-| 周 | 日期 | 里程碑 | 交付物 |
+| Week | Dates | Milestone | Deliverable |
 |---|---|---|---|
-| W1 | 09/22–09/28 | Proposal 定稿 + 送审；harness 接口冻结 | 本文档 v2 |
-| W2 | 09/29–10/05 | 仿真器 + B0/B1/B2 实现并验证 | 基线分布（n=200） |
-| W3 | 10/06–10/12 | T1/T2 协议 + 校验器；**pilot n=5** | 方差与成本实测 |
-| W4 | 10/13–10/19 | 回算 power，**冻结设计（pre-registration）** | 预注册文档 |
-| W5–W6 | 10/20–11/02 | 全量运行（Batch API） | 450+ episode 日志 |
-| W7 | 11/03–11/09 | 统计分析 + Experiment B | 图表与检验结果 |
-| W8 | 11/10–11/16 | 论文撰写 | 最终报告 |
+| W1 | 09/22–09/28 | Proposal finalised and submitted; harness interfaces frozen | This document, v2 |
+| W2 | 09/29–10/05 | Simulator + B0/B1/B2 implemented and validated | Baseline distributions (n=200) |
+| W3 | 10/06–10/12 | T1/T2 protocol + validator; **pilot n=5** | Measured variance and cost |
+| W4 | 10/13–10/19 | Recompute power, **freeze the design (pre-registration)** | Pre-registration document |
+| W5–W6 | 10/20–11/02 | Full run (Batch API) | 450+ episode logs |
+| W7 | 11/03–11/09 | Statistical analysis + Experiment B | Figures and test results |
+| W8 | 11/10–11/16 | Write-up | Final report |
 
-**W4 的预注册是这个设计里最重要的一步**：主指标、n、检验方法在看到全量结果前必须落定。
-
----
-
-## 10. 提交前自审清单（建议的两个评估维度）
-
-- [x] **一句话研究问题** — §0
-- [x] **数据源/模拟方式明确** — §0（1104 行真实数据 + 校准仿真器）
-- [x] **Baseline 明确且非稻草人** — B1 是现网真实实现，B2 是强算法基线，B0 是下界，T1 是消融
-- [x] **具备生成式 AI 技术深度** — 多智能体协商协议、结构化输出约束、无 temperature 下的方差分解方法论、成本工程
-- [x] **能产生负面结果** — H1 预期方向就是"LLM 不更好"；H3 预期 LLM 有独有失败模式；Experiment B 的 P2 同均值随机基线专为推翻 P1 而设
-- [ ] **待教授确认**：n=30/格 的 power 是否可接受；broker 的 `effort` 档位定在哪一档（直接决定 \$26–\$303 的预算，见 §6.2）；Experiment B 是否作为次实验保留
+**W4's pre-registration is the most important step in this design:** the primary metrics, n, and
+the testing methods must be settled before any full results are seen.
 
 ---
 
-## 11. 尚未解决的问题（需要你或教授拍板）
+## 10. Pre-submission self-review checklist
 
-1. **课程要求的严谨度**：如果这门课要求真实用户数据，24 场地 × 24 小时的快照可能不够——需要确认"仿真 + 真实价格校准"是否被接受为合法数据源。
-2. **是否需要真人被试**：若允许，可加一个小规模 human-in-the-loop 研究（用户对 LLM 协商结果的公平性感知 vs 客观 Jain's index），显著增强贡献；但会引入 IRB 流程。
-3. **broker 的 effort 档位**：这是现在唯一真正影响预算的决定（§6.2）。建议在 pilot 阶段把
-   effort ∈ {low, medium, high} 各跑几个 episode，确认低档位是否损害分配质量，再冻结。
+- [x] **One-sentence research question** — §0
+- [x] **Explicit data source / simulation method** — §0 (1,104 rows of real data + a calibrated
+      simulator + real OSM coordinates)
+- [x] **Baselines explicit and not straw men** — B1 is the real production implementation, B2 is
+      a strong algorithmic baseline, B0 is the floor, T1 is the ablation
+- [x] **Genuine generative-AI depth** — the multi-agent negotiation protocol, structured-output
+      constraints, a variance-decomposition methodology for a world without `temperature`, and
+      cost engineering
+- [x] **Capable of producing negative results** — H1's expected direction is "the LLM is not
+      better"; H3 expects LLM-specific failure modes; Experiment B's same-mean random baseline
+      exists specifically to refute P1 (and in the event, it revised one of my own conclusions)
+- [ ] **For the instructor to confirm:** whether n=60/cell is acceptable; which broker `effort`
+      levels to sweep (this directly sets the $26–$303 budget, §6.2); whether Experiment B
+      stands as the secondary experiment
 
-### 已解决（实现阶段解决的，记录在此以免重复讨论）
+---
 
-- ~~**T2 的 agent 数量上限**：30 个 user-agent 是成本与真实性的折中~~ → **已解决**。
-  做法不是减少请求数（那会让 ρ 失去"需求/供给"的含义、争抢消失），而是**按比例缩小车位供给**
-  （`load_spots(target_total_capacity=30)`，保留全部 24 个真实车位及其价格/距离/EV 多样性），
-  这样 ρ 的原义不变。已用经典基线在两个尺度上各跑 270 个 episode 做**缩放验证**：策略排序在
-  6/6 个 (指标, ρ) 单元格全部保持，各单元格均值最大偏差 0.121
-  （[scale_validation.md](llm-allocation-study/results/scale_validation.md)）。因此 compact
-  场景是全尺寸场景的可信代理，LLM 臂在 compact 上跑是站得住的。
-- ~~**user-agent 是否允许用 Haiku 4.5**~~ → **不再是预算问题**，agent 侧只占 T2 成本的
-  1.4%–2.4%，见 §6.2。
+## 11. Open questions for you or the instructor
+
+1. **Required rigour for this course.** If real user data is required, 24 garages over ~24.5
+   hours may not suffice — I need to confirm whether "simulation calibrated on real price data"
+   is accepted as a legitimate data source.
+2. **Whether human subjects are needed.** If permitted, a small human-in-the-loop study (users'
+   *perceived* fairness of LLM-negotiated allocations vs. the objective Jain's index) would
+   strengthen the contribution considerably, but would introduce an IRB process.
+3. **The broker's effort level.** This is now the only decision that materially affects the
+   budget (§6.2). Recommendation: during the pilot, run a few episodes at each of
+   effort in {low, medium, high}, confirm whether the low setting degrades allocation quality,
+   then freeze.
+
+### Resolved during implementation (recorded here to avoid re-litigating)
+
+- ~~**The cap on T2's agent count:** 30 user-agents is a cost/realism compromise~~ →
+  **Resolved.** Not by reducing the request count (which would strip rho of its demand/supply
+  meaning and eliminate contention altogether) but by **scaling supply proportionally**
+  (`load_spots(target_total_capacity=30)`, retaining all 24 real garages with their price,
+  distance, and EV diversity), so rho keeps its meaning. A **scale validation** was then run,
+  with classical baselines at 270 episodes per scale: strategy ordering held in 6/6 (metric,
+  rho) cells, with a maximum mean deviation of 0.121
+  ([scale_validation.md](llm-allocation-study/results/scale_validation.md)).
+  **Caveat added later:** that validation covers effect magnitude and ordering, **not**
+  statistical precision — measured MDE is 3.00 pp at 30 spaces versus 0.68 pp at full scale,
+  which is why the frozen configuration uses a 240-space fleet
+  ([design_recommendation.md](llm-allocation-study/results/design_recommendation.md)).
+- ~~**Whether user agents may use Haiku 4.5**~~ → **No longer a budget question**; the agent side
+  is 1.4%–2.4% of cost, see §6.2.
+- ~~**Synthetic garage coordinates**~~ → **Replaced with real OpenStreetMap coordinates** after
+  measurement showed the synthetic placement was wrong (median 554 m real vs. 744 m synthetic, KS
+  D=0.301, p=1.2e−06). Logged as Amendment A-2 in `PRE_REGISTRATION.md`, including the
+  consequence that contradicted my own prediction: the effect was differential rather than a
+  shared shift, narrowing the greedy-minus-FIFO gap by 19–37%.

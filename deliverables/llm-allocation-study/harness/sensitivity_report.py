@@ -1,6 +1,7 @@
 """
 Sensitivity analysis for Experiment B's unmeasured utility parameter
-(proposal §7: "用户效用函数是我设定的 -- 效用参数做敏感性扫描，报告结论是否翻转").
+(proposal §7: "the utility function is assumed, not measured -- sweep the utility
+parameters and report whether any conclusion flips").
 
 Price sensitivity (`price_weight`) is set by assumption, not measured, and
 the entire surge-pricing mechanism runs through it. This script re-tests
@@ -30,9 +31,9 @@ import pandas as pd
 from scipy import stats
 
 SETTINGS = [
-    ("0.4_0.6", "low level, narrow"),
+    ("0.4_0.6", "low level, homogeneous"),
     ("0.8_1.2", "BASELINE"),
-    ("1.6_2.4", "high level, narrow"),
+    ("1.6_2.4", "high level, homogeneous"),
     ("0.2_2.0", "mid level, wide"),
     ("0.1_3.9", "high level, very wide"),
 ]
@@ -58,11 +59,11 @@ def verdict(pct: float, p: float, expected_sign: int) -> str:
     """expected_sign: +1 if the baseline conclusion was 'positive', -1 if
     'negative', 0 if the baseline conclusion was 'no significant effect'."""
     if p >= 0.05:
-        return "不显著" if expected_sign != 0 else "不显著 (一致)"
+        return "not significant"
     if expected_sign == 0:
-        return "显著 (翻转!)" if pct != 0 else "—"
+        return "significant (FLIPPED)" if pct != 0 else "--"
     same = (pct > 0) == (expected_sign > 0)
-    return "一致" if same else "**翻转!**"
+    return "consistent" if same else "**FLIPPED**"
 
 
 def main():
@@ -95,14 +96,14 @@ def main():
         rows1.append({
             "setting": label, "pw_mean": mean_pw, "pw_sd": sd_pw,
             "util_pct": c1["pct"], "cohens_d": c1["d"], "p": c1["p"],
-            "结论": verdict(c1["pct"], c1["p"], -1),
+            "verdict": verdict(c1["pct"], c1["p"], -1),
         })
 
         c2 = contrast(df, rho, "p1_rule_surge", "p2_permuted_surge", "revenue_usd")
         rows2.append({
             "setting": label, "pw_mean": mean_pw, "pw_sd": sd_pw,
             "revenue_pct": c2["pct"], "cohens_d": c2["d"], "p": c2["p"],
-            "结论": verdict(c2["pct"], c2["p"], +1),
+            "verdict": verdict(c2["pct"], c2["p"], +1),
         })
 
         mm = df[(df.rho == rho) & (df.strategy == "p2_permuted_surge")].mean_multiplier.mean()
@@ -111,30 +112,32 @@ def main():
             "setting": label, "pw_mean": mean_pw, "pw_sd": sd_pw,
             "extra_price_pct": 100 * (mm - 1),
             "revenue_pct": c3["pct"], "p": c3["p"],
-            "结论": verdict(c3["pct"], c3["p"], -1),
+            "verdict": verdict(c3["pct"], c3["p"], -1),
         })
 
     t1, t2, t3 = pd.DataFrame(rows1), pd.DataFrame(rows2), pd.DataFrame(rows3)
 
     def n_consistent(t):
-        return int((t["结论"] == "一致").sum()), len(t)
+        return int((t["verdict"] == "consistent").sum()), len(t)
 
     lines = [
-        "# Experiment B 敏感性分析：三条结论各自站不站得住\n",
-        f"对比在 ρ={rho}（最高争抢）下计算，每档 n=30 配对 episode。`price_weight` 的取值"
-        f"范围是**设定的、非实测的**，整个加价机制都通过它起作用，所以这是 Proposal §7 要求"
-        f"的那项敏感性扫描。\n",
-        "扫描同时变动**水平**与**离散度**：加价的作用机制是"
-        "\"把价格敏感的人挤走、留下不敏感的人\"，所以异质性本身就是机制的一部分——"
-        "均值相同但离散度不同的两个人群，行为可以相反。\n",
+        "# Experiment B sensitivity analysis: which conclusions actually hold\n",
+        f"Contrasts computed at rho={rho} (highest contention), n=30 paired episodes per "
+        f"setting. The `price_weight` range is **assumed, not measured**, and the entire "
+        f"surge mechanism runs through it -- so this is the sweep the proposal's threats-to-"
+        f"validity table (§7) requires.\n",
+        "The sweep varies **level** and **spread** independently. Surge pricing works by "
+        "pushing price-sensitive users out while insensitive ones stay, so heterogeneity is "
+        "part of the mechanism, not a nuisance: two populations with the same mean "
+        "sensitivity but different spread can behave in opposite directions.\n",
         "---\n",
-        f"## 结论① 生产规则降低利用率 —— {'/'.join(map(str, n_consistent(t1)))} 档一致\n",
+        f"## Conclusion 1: the production rule lowers utilization -- consistent in {'/'.join(map(str, n_consistent(t1)))} settings\n",
         t1.round(4).to_markdown(index=False),
         "\n",
-        f"## 结论② 瞄准比随机加价更赚钱（同均值乘数） —— {'/'.join(map(str, n_consistent(t2)))} 档一致\n",
+        f"## Conclusion 2: targeting beats same-mean random surcharges -- consistent in {'/'.join(map(str, n_consistent(t2)))} settings\n",
         t2.round(4).to_markdown(index=False),
         "\n",
-        f"## 结论③ 不瞄准的涨价赚不到钱 —— {'/'.join(map(str, n_consistent(t3)))} 档一致\n",
+        f"## Conclusion 3: untargeted increases capture no revenue -- strictly consistent in {'/'.join(map(str, n_consistent(t3)))} settings\n",
         t3.round(4).to_markdown(index=False),
         "\n",
     ]
@@ -143,9 +146,10 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines))
     print(f"Wrote {out}")
-    for name, t in (("①利用率下降", t1), ("②瞄准有价值", t2), ("③随机涨价无收益", t3)):
+    for name, t in (("1 utilization drops", t1), ("2 targeting pays", t2),
+                     ("3 untargeted captures nothing", t3)):
         c, n = n_consistent(t)
-        print(f"  {name}: {c}/{n} 档与基线一致")
+        print(f"  {name}: consistent with baseline in {c}/{n} settings")
 
 
 if __name__ == "__main__":

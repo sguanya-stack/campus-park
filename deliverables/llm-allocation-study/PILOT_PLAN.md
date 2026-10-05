@@ -1,15 +1,17 @@
-# 低成本 Pilot 方案
+# Low-cost pilot plan
 
-在投入全网格（约 \$748）之前，用**约 \$6 分四步**回答四个问题。每一步都有明确的
-"发现什么就停下来"的门槛——pilot 的价值不在于省那点钱，而在于**在便宜的时候发现设计缺陷**。
+Before committing the full grid (~$748), spend about **$6 across four steps** to answer four
+questions. Every step has an explicit stop condition. The value of a pilot is not the money it
+saves — it is **finding design defects while they are still cheap to fix**.
 
-前置：`export ANTHROPIC_API_KEY=sk-ant-...`；全部在 `deliverables/llm-allocation-study/` 下执行。
+Prerequisite: `export ANTHROPIC_API_KEY=sk-ant-...`. All commands run from
+`deliverables/llm-allocation-study/`.
 
 ---
 
-## Step 0 —— 一次最小调用（约 \$0.02）
+## Step 0 — one minimal call (about $0.02)
 
-**问题：** 认证、模型 ID、strict schema、工具调用这条链路通不通？
+**Question:** does the chain work at all — auth, model ID, strict schema, tool calling?
 
 ```bash
 python3 - <<'PY'
@@ -32,34 +34,36 @@ print("tool input:", [b.input for b in r.content if getattr(b, "type", None) == 
 PY
 ```
 
-**停下来的条件：** 报 400（模型 ID 或参数不对）、`stop_reason` 不是 `tool_use`、
-或返回的 JSON 不符合 schema。这些都属于"代码问题"，不该用真实 episode 去发现。
+**Stop if:** a 400 comes back (wrong model ID or parameter), `stop_reason` is not `tool_use`,
+or the returned JSON does not match the schema. These are code problems and should not be
+discovered by burning real episodes.
 
 ---
 
-## Step 1 —— T1 单 episode（约 \$1）
+## Step 1 — one T1 episode (about $1)
 
-**问题：** 成本估算准不准？非法分配率是不是零？
+**Question:** how accurate is the cost estimate, and what is the illegal-allocation rate?
 
 ```bash
 python3 -m harness.run_experiment --strategies llm_central --loads 1.2 --n-seeds 1 \
   --target-capacity 240 --efforts high --full-logs --out-name pilot_t1
 ```
 
-检查 `results/pilot_t1.csv`：
+Check `results/pilot_t1.csv`:
 
-| 字段 | 期望 | 不符合时怎么办 |
+| Field | Expectation | What to do otherwise |
 |---|---|---|
-| `cost_usd` | ≈ \$0.91（估算值） | 偏差 >2 倍 → 回到 `PRE_REGISTRATION.md` §7 改预算并**重新冻结** |
-| `illegal_allocation_rate` | 任意值都是数据（H3 就是测这个） | 若 >0.5，先看 `runs/*_full.json` 的 transcript 确认不是 prompt 缺陷而是模型能力 |
-| `parse_failure_rate` | 应为 0 | >0 说明 strict schema 没起作用，属代码问题，先修 |
-| `success_rate` | 与 Greedy 同量级 | 若接近 0，多半是 prompt 里信息给漏了，不是模型不行 |
+| `cost_usd` | ≈ $0.91 (the projection) | More than 2x off → revise the budget in `PRE_REGISTRATION.md` §7 and **re-freeze** |
+| `illegal_allocation_rate` | any value is data (this is what H3 measures) | Above 0.5, read the transcript in `runs/*_full.json` first to confirm it is model capability and not a prompt defect |
+| `parse_failure_rate` | should be 0 | Above 0 means the strict schema is not doing its job — a code problem, fix it first |
+| `success_rate` | same order of magnitude as Greedy | Near 0 usually means the prompt omits information, not that the model is incapable |
 
 ---
 
-## Step 2 —— T2 单 episode（约 \$1.8）
+## Step 2 — one T2 episode (about $1.80)
 
-**问题：** 三轮协商链路是否真的跑满？成本是不是 T1 的约 1.85 倍？
+**Question:** does the three-round negotiation actually complete, and is the cost roughly
+1.85x T1?
 
 ```bash
 python3 -m harness.run_experiment --strategies llm_negotiate --loads 1.2 --n-seeds 1 \
@@ -76,63 +80,66 @@ for w in log.get("llm_transcript") or []:
 PY
 ```
 
-**关键检查：`n_revised` 必须至少在一些窗口里大于 0。** 如果全是 0，说明修正轮没有真正发生
-——这正是之前那个 tool 名不匹配 bug 的症状，只不过这次会是别的原因。**全 0 就停，不要继续。**
+**The critical check: `n_revised` must be greater than 0 in at least some windows.** If it is
+0 everywhere, the revision round is not actually running — which is exactly the symptom of the
+tool-name mismatch bug fixed earlier, though this time the cause would be something else.
+**All zeros means stop; do not continue.**
 
 ---
 
-## Step 3 —— 方差与检验力探针（约 \$3）
+## Step 3 — variance and power probe (about $3)
 
-**问题：** 模型随机性有多大？冻结的 n=60 够不够？
+**Question:** how large is the model's own jitter, and is the frozen n=60 still adequate?
 
-同一个场景（同一个 seed）跑 3 次，测模型自身抖动：
+Run the same scenario (same seed) three times to measure model jitter:
 
 ```bash
-for i in 1 2 3; do
-  python3 -m harness.run_experiment --strategies llm_negotiate --loads 1.2 \
-    --n-seeds 1 --seed-start 1 --target-capacity 240 --efforts high \
-    --out-name pilot_rep_$i
-done
-python3 - <<'PY'
-import pandas as pd, glob
-df = pd.concat([pd.read_csv(f) for f in sorted(glob.glob("results/pilot_rep_*.csv"))])
-print(df[["success_rate", "jains_index", "illegal_allocation_rate", "cost_usd"]])
-print("\n同一场景下的模型抖动 (sd):")
-print(df[["success_rate", "jains_index"]].std(ddof=1))
-PY
+python3 -m harness.run_experiment --strategies llm_negotiate --loads 1.2 \
+  --n-seeds 1 --seed-start 1 --target-capacity 240 --efforts high \
+  --replicates 3 --out-name pilot_rep
+
+python3 -m harness.variance_analysis --csv results/pilot_rep.csv \
+  --out results/pilot_variance.md
 ```
 
-**判据：** 把这个 sd 与 `results/expA_classic_power.md` 里经典臂的配对差 sd（≈0.031）比较。
+**Decision criterion:** compare the within-cell jitter SD against the classical arms'
+paired-difference SD in `results/expA_classic_power.md` (about 0.031).
 
-- 模型抖动 **≪ 0.031** → n=60 的检验力结论成立，按冻结配置跑。
-- 模型抖动 **与之相当或更大** → 冻结的 MDE 偏乐观。**此时不要偷偷加种子**
-  （预注册 §5 禁止），而应回到 `PRE_REGISTRATION.md` 修订 n、记录修订理由与日期、
-  重新冻结，再开跑。
+- Jitter **much smaller** than 0.031 → the n=60 power conclusion holds; run the frozen config.
+- Jitter **comparable or larger** → the frozen MDE is optimistic. **Do not quietly add seeds**
+  (PRE_REGISTRATION §5 forbids it). Return to `PRE_REGISTRATION.md`, revise n, record the
+  reason and the date, re-freeze, then run.
+
+Note that real geography narrowed the greedy-vs-FIFO gap by 19–37% (Amendment A-2). If real
+geography compresses differences between allocation strategies generally, the LLM-vs-Greedy
+effect is likely smaller than originally planned for — which makes this step more important,
+not less.
 
 ---
 
-## 全部通过后
+## Once every step passes
 
 ```bash
-# 主网格（约 $553）
+# main grid (about $553)
 python3 -m harness.run_experiment --strategies llm_central,llm_negotiate \
   --loads 0.8,1.2,2.0 --n-seeds 60 --target-capacity 240 --efforts high \
-  --out-name expA_llm_high
+  --replicates 3 --out-name expA_llm_high
 
-# effort 消融（约 $194）
+# effort ablation (about $194)
 python3 -m harness.run_experiment --strategies llm_central,llm_negotiate \
   --loads 0.8,1.2,2.0 --n-seeds 20 --target-capacity 240 --efforts low,medium \
-  --out-name expA_llm_ablation
+  --replicates 3 --out-name expA_llm_ablation
 ```
 
-## 成本小结
+## Cost summary
 
-| 步骤 | 估算 | 买到的信息 |
+| Step | Estimate | What it buys |
 |---|---|---|
-| Step 0 | \$0.02 | API 链路是否通 |
-| Step 1 | \$1.00 | 成本估算精度、非法分配率量级 |
-| Step 2 | \$1.80 | 协商链路是否真的跑满 |
-| Step 3 | \$3.00 | 模型方差 → 检验力是否成立 |
-| **pilot 合计** | **≈ \$6** | **在花 \$748 之前把设计缺陷都暴露出来** |
+| 0 | $0.02 | whether the API path works |
+| 1 | $1.00 | cost-estimate accuracy, order of magnitude of the illegal rate |
+| 2 | $1.80 | whether the negotiation rounds actually complete |
+| 3 | $3.00 | model variance, and whether the power claim survives |
+| **Pilot total** | **≈ $6** | **surfacing design defects before spending $748** |
 
-一条经验：上面每一个"停下来的条件"，对应的都是一类**用全网格去发现会浪费几百美元**的问题。
+Each stop condition above corresponds to a class of problem that would otherwise cost several
+hundred dollars to discover from the full grid.

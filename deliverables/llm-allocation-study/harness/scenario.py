@@ -27,7 +27,7 @@ DURATION_WEIGHTS = [0.25, 0.25, 0.35, 0.15]
 EV_REQUEST_FRACTION = 0.15
 ORIGIN_JITTER_RADIUS_M = 1500.0
 
-# Price sensitivity is a *设定* parameter, not measured from data -- the
+# Price sensitivity is an ASSUMED parameter, not measured from data -- the
 # proposal flags this as a high-severity threat to validity (§7) because the
 # whole "surge pricing pushes marginal users out" mechanism scales with it.
 # Exposed as a range so it can be swept; see results/pricing_sensitivity.md.

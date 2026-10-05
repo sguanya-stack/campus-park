@@ -183,7 +183,7 @@ def main():
           "number is far off, the proposal's cost table needs updating -- not this script "
           "quietly bent to match it.")
     print("Next step for a REAL number: run one pilot episode and read cost_usd "
-          "(see README '跑真实 LLM episode 之前要过的三道门').")
+          "(see README section 'Gates to clear before spending on real LLM episodes').")
 
 
 if __name__ == "__main__":
