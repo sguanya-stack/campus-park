@@ -12,3 +12,9 @@ __pycache__/
 # in results/*.csv (reproducibility is verified in CI), so they are not worth
 # the repo weight.
 deliverables/llm-allocation-study/runs/
+# Report HTML is generated from the .md by deliverables/make_report_html.py.
+# GitHub renders Markdown natively, so the HTML is only for emailing/printing
+# and does not belong in the repo. (serving/static/dashboard.html is NOT
+# generated — it is the console's source and stays tracked.)
+deliverables/*.html
+deliverables/llm-allocation-study/*.html
