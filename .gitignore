@@ -23,3 +23,6 @@ deliverables/llm-allocation-study/*.html
 deliverables/uml/
 deliverables/campuspark_final.*
 deliverables/generate_pdf.py
+# Private working file: draft email with notes about submission timing and
+# disclosure policy. Not for a public repo.
+deliverables/EMAIL_DRAFT.md
