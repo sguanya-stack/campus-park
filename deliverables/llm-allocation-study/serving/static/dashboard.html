@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Allocator Console</title>
+<style>
+/* Validated default palette: categorical slots 1-3 (blue/orange/aqua) clear the
+   all-pairs CVD and normal-vision gates in both modes; status colors are the
+   reserved set and always ship with an icon + label, never color alone. */
+:root {
+  color-scheme: light;
+  --surface-0:#f5f5f3; --surface-1:#fcfcfb; --rule:#e5e4e0;
+  --ink:#0b0b0b; --ink2:#52514e; --ink3:#86857f;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
+  --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#d03b3b;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --surface-0:#121211; --surface-1:#1a1a19; --rule:#33332f;
+    --ink:#fff; --ink2:#c3c2b7; --ink3:#8f8e86;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-0:#121211; --surface-1:#1a1a19; --rule:#33332f;
+  --ink:#fff; --ink2:#c3c2b7; --ink3:#8f8e86;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+}
+* { box-sizing:border-box; }
+body {
+  margin:0; padding:24px 16px 48px; background:var(--surface-0); color:var(--ink);
+  font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap { max-width:1000px; margin:0 auto; }
+header { display:flex; align-items:flex-start; gap:16px; flex-wrap:wrap; margin-bottom:6px; }
+h1 { font-size:19px; margin:0; font-weight:650; letter-spacing:-.01em; }
+.lede { color:var(--ink2); font-size:13px; margin:2px 0 20px; max-width:62ch; }
+
+.pill {
+  margin-left:auto; display:inline-flex; align-items:center; gap:7px;
+  padding:6px 12px; border-radius:999px; font-size:12.5px; font-weight:650;
+  border:1.5px solid currentColor; white-space:nowrap;
+}
+.dot { width:8px; height:8px; border-radius:50%; background:currentColor; flex:none; }
+
+.grid { display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(156px,1fr)); }
+.tile {
+  background:var(--surface-1); border:1px solid var(--rule); border-radius:8px;
+  padding:13px 14px;
+}
+.tile .k { font-size:11px; color:var(--ink3); text-transform:uppercase; letter-spacing:.06em; font-weight:600; }
+.tile .v { font-size:25px; font-weight:650; font-variant-numeric:tabular-nums; margin-top:3px; line-height:1.15; }
+.tile .n { font-size:11.5px; color:var(--ink3); margin-top:2px; }
+.tile.accent-1 .v { color:var(--s1); } .tile.accent-2 .v { color:var(--s2); }
+.tile.accent-3 .v { color:var(--s3); } .tile.accent-crit .v { color:var(--critical); }
+.tile .v.idle { color:var(--ink3) !important; font-weight:400; }
+
+h2 { font-size:12px; color:var(--ink3); text-transform:uppercase; letter-spacing:.07em;
+     font-weight:650; margin:26px 0 9px; }
+
+.panel { background:var(--surface-1); border:1px solid var(--rule); border-radius:8px; padding:15px; }
+.row { display:flex; gap:9px; align-items:center; flex-wrap:wrap; }
+button {
+  font:inherit; font-size:13.5px; font-weight:600; padding:8px 15px; border-radius:7px;
+  border:1px solid var(--rule); background:var(--surface-0); color:var(--ink); cursor:pointer;
+}
+button.primary { background:var(--s1); border-color:var(--s1); color:#fff; }
+button:hover { filter:brightness(1.06); } button:active { transform:translateY(1px); }
+button:disabled { opacity:.5; cursor:not-allowed; transform:none; }
+select {
+  font:inherit; font-size:13.5px; padding:7px 9px; border-radius:7px;
+  border:1px solid var(--rule); background:var(--surface-0); color:var(--ink);
+}
+label { font-size:12.5px; color:var(--ink2); }
+
+#log { font-family:var(--mono); font-size:11.5px; line-height:1.75; max-height:260px;
+       overflow-y:auto; margin:0; }
+#log div { padding:2px 0; border-bottom:1px solid var(--rule); white-space:pre-wrap; }
+#log div:last-child { border-bottom:none; }
+.t-ok{color:var(--good)} .t-fb{color:var(--warning)} .t-err{color:var(--critical)}
+.t-dim{color:var(--ink3)}
+.empty { color:var(--ink3); font-size:13px; font-style:italic; }
+#sim { display:none; margin:0 0 18px; padding:11px 14px; border-radius:8px;
+       border:1.5px solid var(--warning); background:var(--surface-1);
+       font-size:13px; line-height:1.5; }
+#sim b { color:var(--warning); }
+footer { margin-top:28px; color:var(--ink3); font-size:11.5px; border-top:1px solid var(--rule); padding-top:12px; }
+code { font-family:var(--mono); font-size:.9em; background:var(--surface-0); padding:.1em .35em; border-radius:3px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div>
+    <h1>Allocator Console</h1>
+  </div>
+  <span class="pill" id="pill" style="color:var(--ink3)">
+    <span class="dot"></span><span id="pill-text">connecting…</span>
+  </span>
+</header>
+<div id="sim">
+  <b>⚠ Simulated model.</b> A fake model is driving this console so the safety layer
+  can be demonstrated without an API key — it hallucinates spot IDs and fails on
+  purpose. <b>These numbers are not research data</b> and appear nowhere in the study's
+  results. Set <code>ANTHROPIC_API_KEY</code> and drop <code>ALLOCATOR_POLICY=demo</code>
+  to drive the real arms.
+</div>
+<p class="lede">
+  Live view of the production allocation service. The LLM arm is wrapped in a cost
+  ceiling, a circuit breaker, a deadline, a validator gate that drops illegal
+  allocations, and a deterministic Greedy fallback — so the panel below is also a
+  demonstration of graceful degradation, not just a metrics readout.
+</p>
+
+<h2>Throughput &amp; quality</h2>
+<div class="grid" id="tiles-a"></div>
+
+<h2>Reliability &amp; cost</h2>
+<div class="grid" id="tiles-b"></div>
+
+<h2>Drive traffic</h2>
+<div class="panel">
+  <div class="row">
+    <label for="batch">Batch size</label>
+    <select id="batch">
+      <option>1</option><option selected>8</option><option>24</option><option>60</option>
+    </select>
+    <button class="primary" id="go">Send batch</button>
+    <button id="auto">Start auto</button>
+    <span class="t-dim" id="hint" style="font-size:12.5px"></span>
+  </div>
+</div>
+
+<h2>Decision log</h2>
+<div class="panel"><div id="log"><span class="empty">No decisions yet — send a batch.</span></div></div>
+
+<footer>
+  Polls <code>/metrics</code> and <code>/healthz</code> every 2s. Requests are synthetic,
+  generated in-browser against the same 24 real garages the study uses.
+</footer>
+
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const fmtPct = v => (v * 100).toFixed(1) + '%';
+const fmtMs  = v => v >= 1000 ? (v / 1000).toFixed(2) + ' s' : v.toFixed(1) + ' ms';
+const fmtUsd = v => '$' + (v < 1 ? v.toFixed(4) : v.toFixed(2));
+
+// Breaker state -> reserved status color + an icon and a label, so state is
+// never communicated by color alone.
+const BREAKER = {
+  closed:    { color: 'good',     icon: '●', label: 'LLM live' },
+  half_open: { color: 'warning',  icon: '◐', label: 'trial request' },
+  open:      { color: 'critical', icon: '○', label: 'LLM bypassed' },
+};
+
+function tile(k, v, note, accent) {
+  const idle = v === '\u2014' ? ' idle' : '';
+  return `<div class="tile ${accent || ''}"><div class="k">${k}</div>
+          <div class="v${idle}">${v}</div><div class="n">${note || '&nbsp;'}</div></div>`;
+}
+
+async function poll() {
+  try {
+    const [m, h] = await Promise.all([
+      fetch('/metrics').then(r => r.json()),
+      fetch('/healthz').then(r => r.json().catch(() => ({}))).catch(() => ({})),
+    ]);
+    render(m, h);
+  } catch (e) {
+    $('#pill').style.color = 'var(--critical)';
+    $('#pill-text').textContent = 'service unreachable';
+  }
+}
+
+function render(m, h) {
+  const b = BREAKER[h.breaker] || { color: 'ink3', icon: '?', label: h.breaker || 'unknown' };
+  $('#sim').style.display = h.mode === 'simulated' ? 'block' : 'none';
+  $('#pill').style.color = `var(--${b.color})`;
+  $('#pill-text').textContent = `${b.icon}  breaker ${h.breaker} · ${b.label}`;
+
+  const served = m.decisions || 0;
+  $('#tiles-a').innerHTML =
+    tile('Decisions', served, served ? `${m.requests} requests` : 'idle') +
+    tile('Success rate', served ? fmtPct(m.success_rate) : '—',
+         served ? `${m.satisfied} satisfied` : 'no traffic yet', 'accent-1') +
+    tile('Fallback rate', served ? fmtPct(m.fallback_rate) : '—',
+         'decisions served by Greedy', 'accent-2') +
+    tile('Illegal rate', served ? fmtPct(m.illegal_allocation_rate) : '—',
+         `${m.illegal_allocations} rejected by the gate`,
+         m.illegal_allocations > 0 ? 'accent-crit' : 'accent-3');
+
+  $('#tiles-b').innerHTML =
+    tile('Latency p50', served ? fmtMs(m.latency_ms_p50) : '—', 'per decision') +
+    tile('Latency p95', served ? fmtMs(m.latency_ms_p95) : '—', `window ${m.window_size}`) +
+    tile('Spend', fmtUsd(m.cost_usd || 0),
+         h.cost_ceiling_usd ? `ceiling ${fmtUsd(h.cost_ceiling_usd)}` : '') +
+    tile('Cost / satisfied', m.satisfied ? fmtUsd(m.cost_per_satisfied_usd) : '—',
+         (m.cost_usd || 0) === 0 ? 'no API spend yet' : '');
+}
+
+// ── synthetic traffic ──────────────────────────────────────────────────
+// Same anchor the scraper used (parking.py), so the generated origins sit
+// inside the real search radius the study's garages were collected for.
+const ANCHOR = { lat: 47.61385, lng: -122.20017 };
+let seq = 0;
+
+function makeBatch(n) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const ang = Math.random() * 2 * Math.PI;
+    const rad = Math.sqrt(Math.random()) * 1500;   // uniform in area, metres
+    out.push({
+      id: `ui-${++seq}`,
+      arrival_minute: +(Math.random() * 170).toFixed(1),
+      duration_minutes: [60, 90, 120, 180][Math.floor(Math.random() * 4)],
+      trip_value: +(18 + Math.random() * 22).toFixed(2),
+      price_weight: +(0.8 + Math.random() * 0.4).toFixed(2),
+      walk_weight: +(0.01 + Math.random() * 0.04).toFixed(3),
+      walk_tolerance_m: Math.round(100 + Math.random() * 700),
+      needs_ev: Math.random() < 0.15,
+      reservation_frac: +(0.1 + Math.random() * 0.2).toFixed(2),
+      origin_lat: ANCHOR.lat + (rad * Math.cos(ang)) / 111320,
+      origin_lng: ANCHOR.lng + (rad * Math.sin(ang)) / (111320 * Math.cos(ANCHOR.lat * Math.PI / 180)),
+    });
+  }
+  return out;
+}
+
+function logLine(html, cls) {
+  const log = $('#log');
+  if (log.querySelector('.empty')) log.innerHTML = '';
+  const div = document.createElement('div');
+  div.className = cls || '';
+  div.innerHTML = html;
+  log.prepend(div);
+  while (log.children.length > 60) log.lastChild.remove();
+}
+
+async function sendBatch(n) {
+  const body = makeBatch(n);
+  const t0 = performance.now();
+  let r;
+  try {
+    r = await fetch('/allocate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    logLine(`<b>network error</b> — ${e.message}`, 't-err');
+    return;
+  }
+  const rtt = performance.now() - t0;
+  const d = await r.json();
+  if (!r.ok) {
+    logLine(`<b>HTTP ${r.status}</b> ${d.error || ''}`, 't-err');
+    return;
+  }
+
+  const cls = d.reason && String(d.reason).includes('error') ? 't-err'
+            : d.degraded ? 't-fb' : 't-ok';
+  const ts = new Date().toLocaleTimeString([], { hour12: false });
+  const why = d.degraded ? ` · <b>degraded</b>: ${d.reason}` : '';
+  const bad = d.illegal_rejected ? ` · <b>${d.illegal_rejected} illegal rejected</b>` : '';
+  const spend = d.cost_usd ? ` · ${fmtUsd(d.cost_usd)}` : '';
+  logLine(
+    `${ts}  n=${String(n).padStart(2)}  policy=${d.policy}  ` +
+    `satisfied=${d.satisfied}/${n}  rtt=${fmtMs(rtt)}${spend}${why}${bad}`, cls);
+  poll();
+}
+
+$('#go').addEventListener('click', async () => {
+  const btn = $('#go');
+  btn.disabled = true; btn.textContent = 'sending…';
+  await sendBatch(+$('#batch').value);
+  btn.disabled = false; btn.textContent = 'Send batch';
+});
+
+let timer = null;
+$('#auto').addEventListener('click', () => {
+  const btn = $('#auto');
+  if (timer) {
+    clearInterval(timer); timer = null;
+    btn.textContent = 'Start auto'; $('#hint').textContent = '';
+  } else {
+    timer = setInterval(() => sendBatch(+$('#batch').value), 3000);
+    btn.textContent = 'Stop auto';
+    $('#hint').textContent = 'one batch every 3s';
+    sendBatch(+$('#batch').value);
+  }
+});
+
+poll();
+setInterval(poll, 2000);
+</script>
+</body>
+</html>

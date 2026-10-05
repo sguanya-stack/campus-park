@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Progress Report — LLM Multi-Agent Negotiation vs. Classical Schedulers for Parking Allocation</title>
+<style>
+:root { --ink:#1a1a1a; --muted:#5a6675; --rule:#d9dee5; --accent:#2f5d8a;
+        --bg:#ffffff; --code-bg:#f5f7fa; --warn-bg:#fff8e6; --warn-br:#e0b23c; }
+* { box-sizing: border-box; }
+body {
+  margin: 0 auto; max-width: 860px; padding: 56px 40px 96px;
+  background: var(--bg); color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+               "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  font-size: 16px; line-height: 1.75; -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 1.85em; line-height: 1.3; margin: 0 0 .2em;
+     border-bottom: 3px solid var(--accent); padding-bottom: .4em; }
+h2 { font-size: 1.32em; margin: 2.2em 0 .7em; padding-bottom: .3em;
+     border-bottom: 1px solid var(--rule); }
+h3 { font-size: 1.1em; margin: 1.8em 0 .5em; color: var(--accent); }
+p, li { margin: .6em 0; }
+strong { font-weight: 650; }
+blockquote { margin: 1.2em 0; padding: .8em 1.2em; border-left: 4px solid var(--accent);
+             background: #f4f8fc; color: #2a3a4a; }
+blockquote p { margin: .3em 0; }
+table { border-collapse: collapse; width: 100%; margin: 1.2em 0; font-size: .93em; }
+th, td { border: 1px solid var(--rule); padding: 8px 11px; text-align: left;
+         vertical-align: top; }
+th { background: #eef2f7; font-weight: 650; }
+tr:nth-child(even) td { background: #fafbfc; }
+code { background: var(--code-bg); padding: .12em .38em; border-radius: 3px;
+       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+       font-size: .88em; }
+pre { background: var(--code-bg); border: 1px solid var(--rule); border-radius: 5px;
+      padding: 14px 16px; overflow-x: auto; line-height: 1.55; }
+pre code { background: none; padding: 0; font-size: .85em; }
+hr { border: none; border-top: 1px solid var(--rule); margin: 2.4em 0; }
+a { color: var(--accent); }
+.fig-wrap { margin: 1.8em 0; padding: 14px; border: 1px solid var(--rule);
+            border-radius: 6px; background: var(--bg); }
+.fig-wrap svg { display: block; width: 100%; height: auto; }
+.meta { color: var(--muted); font-size: .88em; margin-top: 3.5em;
+        border-top: 1px solid var(--rule); padding-top: 1em; }
+@media print {
+  body { max-width: none; padding: 0; font-size: 11pt; }
+  h2 { page-break-after: avoid; }
+  table, pre, blockquote, .fig-wrap { page-break-inside: avoid; }
+  .meta { display: none; }
+}
+</style>
+</head>
+<body>
+<h1 id="progress-report-llm-multi-agent-negotiation-vs-classical-schedulers-for-parking-allocation">Progress Report — LLM Multi-Agent Negotiation vs. Classical Schedulers for Parking Allocation</h1>
+<p><strong>Student:</strong> Guanya Song (song.guany@northeastern.edu)
+<strong>Date:</strong> 2026-09-23
+<strong>System under study:</strong> CampusPark, a parking reservation platform I built (Node.js + Prisma + PostgreSQL)</p>
+<hr>
+<h2 id="1-research-question">1. Research question</h2>
+<blockquote>
+<p>In a contended parking-allocation setting calibrated on real parking-market data, does
+LLM-driven multi-agent negotiation differ from greedy / first-come-first-served scheduling
+in <strong>allocation success rate</strong> and <strong>fairness</strong> — and what does it cost, including failure
+modes classical schedulers cannot exhibit?</p>
+</blockquote>
+<p>A secondary experiment (B) asks whether the dynamic pricing rule already running in
+CampusPark actually improves spot utilization.</p>
+<hr>
+<h2 id="2-status-at-a-glance">2. Status at a glance</h2>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Simulator (real-data loader, seeded scenario generation, interval-scheduling engine)</td>
+<td><strong>Complete</strong></td>
+</tr>
+<tr>
+<td>Classical baselines: Random, FIFO, Greedy</td>
+<td><strong>Complete</strong> — 1,080 episodes across three fleet scales</td>
+</tr>
+<tr>
+<td>Scale validation (does a smaller fleet reproduce the phenomenon?)</td>
+<td><strong>Complete</strong></td>
+</tr>
+<tr>
+<td>Power analysis from measured variance</td>
+<td><strong>Complete</strong></td>
+</tr>
+<tr>
+<td><strong>Experiment B — dynamic pricing benchmark</strong></td>
+<td><strong>Complete, with results</strong> (§4)</td>
+</tr>
+<tr>
+<td><strong>Experiment B sensitivity analysis</strong></td>
+<td><strong>Complete — it overturned one of my own findings</strong> (§4.3)</td>
+</tr>
+<tr>
+<td>LLM policies T1 (single-shot allocator) and T2 (3-round negotiation)</td>
+<td>Implemented and tested offline; <strong>no real API call has been made yet</strong></td>
+</tr>
+<tr>
+<td><strong>Experiment A — the main LLM comparison</strong></td>
+<td><strong>Design frozen and pre-registered; not yet run</strong></td>
+</tr>
+<tr>
+<td>Production serving layer (breaker, fallback, observability, HTTP service)</td>
+<td><strong>Complete</strong> (§6)</td>
+</tr>
+<tr>
+<td>Test suite (75 tests) and CI</td>
+<td><strong>Complete</strong> — zero-cost, network-blocked</td>
+</tr>
+<tr>
+<td>Low-cost pilot plan</td>
+<td><strong>Complete</strong> — ~$6 in four steps, each with a stop condition</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Honest bottom line:</strong> Experiment B is finished and has publishable results. Experiment A is
+fully built, pre-registered, and blocked on one thing only — API budget/credentials
+(~$748 estimated, ~$374 using the Batch API). No LLM result exists yet, and nothing in this
+report claims one.</p>
+<hr>
+<h2 id="3-data-and-simulator">3. Data and simulator</h2>
+<p><strong>Real data.</strong> 1,104 parking quotes scraped from Parkopedia covering <strong>24 garages</strong> in
+Bellevue, WA across <strong>53 time snapshots</strong> (2026-03-20 to 03-21). Prices range \$4.49–\$37.10
+(median \$8.74).</p>
+<p>I also extracted a signal that is not an explicit column: a garage that returns no quote in a
+given snapshot was most likely <em>full</em>, so each garage's appearance rate (17/53 to 53/53)
+serves as a real-data proxy for how frequently it is contended.</p>
+<p><strong>Synthetic fields, documented rather than hidden.</strong> The feed carries no capacity,
+coordinates, or EV flag. These are derived deterministically from the garage ID and are
+listed field-by-field in <code>data_provenance.md</code>. This is a genuine limitation, recorded in the
+threats-to-validity table rather than glossed over.</p>
+<p><strong>Simulator.</strong> Each episode is a 3-hour peak window with Poisson arrivals; requests carry
+heterogeneous duration, trip value, price sensitivity, walk tolerance, and EV need. Spots are
+modeled as capacity-many lanes under interval scheduling — the real hard constraint (you
+cannot double-book a physical space). Scenario generation is fully seeded and byte-identical
+across arms, giving a <strong>paired design</strong>.</p>
+<hr>
+<h2 id="4-experiment-b-dynamic-pricing-complete">4. Experiment B — dynamic pricing (complete)</h2>
+<p><strong>Design.</strong> The allocator is held fixed at Greedy; only price varies. 270 episodes
+(3 arms × 3 load levels × 30 seeds).</p>
+<table>
+<thead>
+<tr>
+<th>Arm</th>
+<th>Definition</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P0 static</td>
+<td>Real CSV prices, unchanged</td>
+</tr>
+<tr>
+<td>P1 rule surge</td>
+<td>×1.5 on contested spots — CampusPark's production rule (<code>server.js:574</code>), rewritten scale-free</td>
+</tr>
+<tr>
+<td>P2 permuted</td>
+<td>The <strong>same number</strong> of ×1.5 surcharges P1 applied that window, relocated to randomly chosen spots</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Why P2 rather than "a random multiplier with the same mean."</strong> My original proposal
+specified U[1.0, 1.5] as the control, on the grounds that it matches P1's mean. It does not:
+U[1.0, 1.5] has mean 1.25, which equals P1's mean only if the surge fires exactly 50% of the
+time, and the trigger rate is unknown. Re-using P1's realized surge <em>count</em> and permuting only
+its placement makes the marginal price distribution identical <strong>by construction</strong> at any
+trigger rate (verified: mean multipliers 1.144 vs 1.143), leaving targeting as the sole
+difference.</p>
+<h3 id="41-result-the-production-rule-reduces-utilization">4.1 Result: the production rule reduces utilization</h3>
+<p>Utilization was the pre-registered primary metric for this experiment. The result runs
+opposite to my hypothesis.</p>
+<table>
+<thead>
+<tr>
+<th>ρ</th>
+<th>Δ utilization (P1 vs P0)</th>
+<th>Cohen's d</th>
+<th>p</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0.8</td>
+<td>−1.31%</td>
+<td>−1.24</td>
+<td>1.8e−07</td>
+</tr>
+<tr>
+<td>1.2</td>
+<td>−1.02%</td>
+<td>−1.02</td>
+<td>4.7e−06</td>
+</tr>
+<tr>
+<td>2.0</td>
+<td><strong>−3.79%</strong></td>
+<td>−4.09</td>
+<td>2.9e−18</td>
+</tr>
+</tbody>
+</table>
+<p>Losses grow with contention. The rule is better described as trading utilization for revenue
+than as an efficiency mechanism.</p>
+<figure class="fig-wrap"><svg class="fig" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 346" width="100%" role="img" aria-label="Experiment B utilization and revenue by pricing arm"><style>.fig{--surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --ink3:#86857f; --grid:#e5e4e0; --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --pos:#2a78d6; --neg:#d03b3b; --mid:#f0efec;}@media (prefers-color-scheme: dark){:root:where(:not([data-theme='light'])) .fig{--surface:#1a1a19; --ink:#ffffff; --ink2:#c3c2b7; --ink3:#8f8e86; --grid:#33332f; --s1:#3987e5; --s2:#d95926; --s3:#199e70; --pos:#3987e5; --neg:#e66767; --mid:#383835;}}:root[data-theme='dark'] .fig{--surface:#1a1a19; --ink:#ffffff; --ink2:#c3c2b7; --ink3:#8f8e86; --grid:#33332f; --s1:#3987e5; --s2:#d95926; --s3:#199e70; --pos:#3987e5; --neg:#e66767; --mid:#383835;}.fig{font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif}.fig .ttl{fill:var(--ink);font-size:14px;font-weight:650}.fig .sub{fill:var(--ink2);font-size:11.5px}.fig .ax{fill:var(--ink2);font-size:11px}.fig .axs{fill:var(--ink3);font-size:10.5px}.fig .val{fill:var(--ink);font-size:10.5px;font-weight:600}.fig .vals{fill:var(--ink);font-size:9.5px;font-weight:600}.fig .grid{stroke:var(--grid);stroke-width:1}.fig .zero{stroke:var(--ink3);stroke-width:1.5}</style><rect width="760" height="346" fill="var(--surface)"/><text x="0" y="16" class="ttl">Experiment B: the surge rule trades utilization for revenue</text><text x="0" y="34.0" class="sub">Greedy allocator held fixed; only price varies. n=30 seeds per cell, 24 real garages. Two panels, never one dual axis.</text><text x="0" y="60" class="ax" style="font-weight:650">Spot utilization</text><line x1="0" y1="270.0" x2="342" y2="270.0" class="grid"/><text x="-6" y="273.5" class="axs" text-anchor="end">0.00</text><line x1="0" y1="220.0" x2="342" y2="220.0" class="grid"/><text x="-6" y="223.5" class="axs" text-anchor="end">0.18</text><line x1="0" y1="170.0" x2="342" y2="170.0" class="grid"/><text x="-6" y="173.5" class="axs" text-anchor="end">0.36</text><line x1="0" y1="120.0" x2="342" y2="120.0" class="grid"/><text x="-6" y="123.5" class="axs" text-anchor="end">0.54</text><line x1="0" y1="70.0" x2="342" y2="70.0" class="grid"/><text x="-6" y="73.5" class="axs" text-anchor="end">0.72</text><path d="M13.0,270.0V191.7A4.0,4.0 0 0 1 17.0,187.7H36.3A4.0,4.0 0 0 1 40.3,191.7V270.0Z" fill="var(--s1)"><title>P0 static · ρ=0.8 · Spot utilization: 0.2964</title></path><text x="26.7" y="182.7" class="vals" text-anchor="middle">0.30</text><path d="M42.3,270.0V192.8A4.0,4.0 0 0 1 46.3,188.8H65.7A4.0,4.0 0 0 1 69.7,192.8V270.0Z" fill="var(--s2)"><title>P1 rule surge · ρ=0.8 · Spot utilization: 0.2925</title></path><text x="56.0" y="183.8" class="vals" text-anchor="middle">0.29</text><path d="M71.7,270.0V192.6A4.0,4.0 0 0 1 75.7,188.6H95.0A4.0,4.0 0 0 1 99.0,192.6V270.0Z" fill="var(--s3)"><title>P2 permuted control · ρ=0.8 · Spot utilization: 0.2931</title></path><text x="85.3" y="183.6" class="vals" text-anchor="middle">0.29</text><text x="57.0" y="286" class="ax" text-anchor="middle">ρ=0.8</text><path d="M127.0,270.0V158.8A4.0,4.0 0 0 1 131.0,154.8H150.3A4.0,4.0 0 0 1 154.3,158.8V270.0Z" fill="var(--s1)"><title>P0 static · ρ=1.2 · Spot utilization: 0.4149</title></path><text x="140.7" y="149.8" class="vals" text-anchor="middle">0.41</text><path d="M156.3,270.0V159.9A4.0,4.0 0 0 1 160.3,155.9H179.7A4.0,4.0 0 0 1 183.7,159.9V270.0Z" fill="var(--s2)"><title>P1 rule surge · ρ=1.2 · Spot utilization: 0.4106</title></path><text x="170.0" y="150.9" class="vals" text-anchor="middle">0.41</text><path d="M185.7,270.0V161.1A4.0,4.0 0 0 1 189.7,157.1H209.0A4.0,4.0 0 0 1 213.0,161.1V270.0Z" fill="var(--s3)"><title>P2 permuted control · ρ=1.2 · Spot utilization: 0.4064</title></path><text x="199.3" y="152.1" class="vals" text-anchor="middle">0.41</text><text x="171.0" y="286" class="ax" text-anchor="middle">ρ=1.2</text><path d="M241.0,270.0V105.5A4.0,4.0 0 0 1 245.0,101.5H264.3A4.0,4.0 0 0 1 268.3,105.5V270.0Z" fill="var(--s1)"><title>P0 static · ρ=2.0 · Spot utilization: 0.6068</title></path><text x="254.7" y="96.5" class="vals" text-anchor="middle">0.61</text><path d="M270.3,270.0V111.8A4.0,4.0 0 0 1 274.3,107.8H293.7A4.0,4.0 0 0 1 297.7,111.8V270.0Z" fill="var(--s2)"><title>P1 rule surge · ρ=2.0 · Spot utilization: 0.5838</title></path><text x="284.0" y="102.8" class="vals" text-anchor="middle">0.58</text><path d="M299.7,270.0V113.1A4.0,4.0 0 0 1 303.7,109.1H323.0A4.0,4.0 0 0 1 327.0,113.1V270.0Z" fill="var(--s3)"><title>P2 permuted control · ρ=2.0 · Spot utilization: 0.5792</title></path><text x="313.3" y="104.1" class="vals" text-anchor="middle">0.58</text><text x="285.0" y="286" class="ax" text-anchor="middle">ρ=2.0</text><line x1="0" y1="270" x2="342" y2="270" class="zero"/><text x="171.0" y="304" class="axs" text-anchor="middle">demand / supply ratio</text><text x="390" y="60" class="ax" style="font-weight:650">Revenue (USD)</text><line x1="390" y1="270.0" x2="732" y2="270.0" class="grid"/><text x="384" y="273.5" class="axs" text-anchor="end">0.0k</text><line x1="390" y1="220.0" x2="732" y2="220.0" class="grid"/><text x="384" y="223.5" class="axs" text-anchor="end">3.2k</text><line x1="390" y1="170.0" x2="732" y2="170.0" class="grid"/><text x="384" y="173.5" class="axs" text-anchor="end">6.5k</text><line x1="390" y1="120.0" x2="732" y2="120.0" class="grid"/><text x="384" y="123.5" class="axs" text-anchor="end">9.8k</text><line x1="390" y1="70.0" x2="732" y2="70.0" class="grid"/><text x="384" y="73.5" class="axs" text-anchor="end">13.0k</text><path d="M403.0,270.0V204.4A4.0,4.0 0 0 1 407.0,200.4H426.3A4.0,4.0 0 0 1 430.3,204.4V270.0Z" fill="var(--s1)"><title>P0 static · ρ=0.8 · Revenue (USD): 4,525</title></path><text x="416.7" y="195.4" class="vals" text-anchor="middle">4.5k</text><path d="M432.3,270.0V203.2A4.0,4.0 0 0 1 436.3,199.2H455.7A4.0,4.0 0 0 1 459.7,203.2V270.0Z" fill="var(--s2)"><title>P1 rule surge · ρ=0.8 · Revenue (USD): 4,605</title></path><text x="446.0" y="194.2" class="vals" text-anchor="middle">4.6k</text><path d="M461.7,270.0V204.5A4.0,4.0 0 0 1 465.7,200.5H485.0A4.0,4.0 0 0 1 489.0,204.5V270.0Z" fill="var(--s3)"><title>P2 permuted control · ρ=0.8 · Revenue (USD): 4,521</title></path><text x="475.3" y="195.5" class="vals" text-anchor="middle">4.5k</text><text x="447.0" y="286" class="ax" text-anchor="middle">ρ=0.8</text><path d="M517.0,270.0V172.8A4.0,4.0 0 0 1 521.0,168.8H540.3A4.0,4.0 0 0 1 544.3,172.8V270.0Z" fill="var(--s1)"><title>P0 static · ρ=1.2 · Revenue (USD): 6,576</title></path><text x="530.7" y="163.8" class="vals" text-anchor="middle">6.6k</text><path d="M546.3,270.0V169.2A4.0,4.0 0 0 1 550.3,165.2H569.7A4.0,4.0 0 0 1 573.7,169.2V270.0Z" fill="var(--s2)"><title>P1 rule surge · ρ=1.2 · Revenue (USD): 6,815</title></path><text x="560.0" y="160.2" class="vals" text-anchor="middle">6.8k</text><path d="M575.7,270.0V173.1A4.0,4.0 0 0 1 579.7,169.1H599.0A4.0,4.0 0 0 1 603.0,173.1V270.0Z" fill="var(--s3)"><title>P2 permuted control · ρ=1.2 · Revenue (USD): 6,561</title></path><text x="589.3" y="164.1" class="vals" text-anchor="middle">6.6k</text><text x="561.0" y="286" class="ax" text-anchor="middle">ρ=1.2</text><path d="M631.0,270.0V114.1A4.0,4.0 0 0 1 635.0,110.1H654.3A4.0,4.0 0 0 1 658.3,114.1V270.0Z" fill="var(--s1)"><title>P0 static · ρ=2.0 · Revenue (USD): 1.039e+04</title></path><text x="644.7" y="105.1" class="vals" text-anchor="middle">10.4k</text><path d="M660.3,270.0V106.0A4.0,4.0 0 0 1 664.3,102.0H683.7A4.0,4.0 0 0 1 687.7,106.0V270.0Z" fill="var(--s2)"><title>P1 rule surge · ρ=2.0 · Revenue (USD): 1.092e+04</title></path><text x="674.0" y="97.0" class="vals" text-anchor="middle">10.9k</text><path d="M689.7,270.0V115.4A4.0,4.0 0 0 1 693.7,111.4H713.0A4.0,4.0 0 0 1 717.0,115.4V270.0Z" fill="var(--s3)"><title>P2 permuted control · ρ=2.0 · Revenue (USD): 1.031e+04</title></path><text x="703.3" y="106.4" class="vals" text-anchor="middle">10.3k</text><text x="675.0" y="286" class="ax" text-anchor="middle">ρ=2.0</text><line x1="390" y1="270" x2="732" y2="270" class="zero"/><text x="561.0" y="304" class="axs" text-anchor="middle">demand / supply ratio</text><rect x="0.0" y="325.0" width="10" height="10" rx="2.5" fill="var(--s1)"/><text x="15.0" y="334.0" class="ax">P0 static</text><rect x="100.9" y="325.0" width="10" height="10" rx="2.5" fill="var(--s2)"/><text x="115.9" y="334.0" class="ax">P1 rule surge</text><rect x="230.2" y="325.0" width="10" height="10" rx="2.5" fill="var(--s3)"/><text x="245.2" y="334.0" class="ax">P2 permuted control</text><text x="760" y="332" class="axs" text-anchor="end">P1 vs P0 utilization, ρ=2.0: −3.54%, d=−4.09, p=7.3e−20</text></svg></figure>
+<p><strong>Figure 1.</strong> The surge rule lowers utilization at every load and buys revenue instead. Two measures, two panels — never one dual axis.</p>
+<h3 id="42-result-the-revenue-gain-comes-from-targeting-not-from-the-price-increase">4.2 Result: the revenue gain comes from targeting, not from the price increase</h3>
+<p>At matched average multipliers, aiming surcharges at contested spots earned <strong>+5.94% over the
+permutation control</strong> (ρ=2.0, d=+3.98, p=1.6e−19). Without P2, the natural reading would have
+been "dynamic pricing raises revenue 6%," crediting the price lever.</p>
+<h3 id="43-a-finding-i-reported-and-then-overturned-myself">4.3 A finding I reported and then overturned myself</h3>
+<p>I initially treated a third result as the sharpest: untargeted price increases captured no
+revenue (P2 charged 13.8% more on average yet revenue <em>fell</em> 0.78%, p=0.008).</p>
+<p>Because price sensitivity is a <strong>set, not measured</strong> parameter, I ran the sensitivity sweep my
+proposal's threats-to-validity table called for — five settings, varying both the <em>level</em> and
+the <em>spread</em> of price sensitivity, holding every other request attribute byte-identical.</p>
+<table>
+<thead>
+<tr>
+<th>Conclusion</th>
+<th>Holds in</th>
+<th>Disposition</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Surge reduces utilization</td>
+<td><strong>5/5</strong>, magnitude monotone in elasticity</td>
+<td>Report unconditionally</td>
+</tr>
+<tr>
+<td>Targeting beats matched-price random</td>
+<td>4/5</td>
+<td>Report <strong>with a boundary condition</strong> (fails for a uniformly highly price-sensitive population)</td>
+</tr>
+<tr>
+<td>Untargeted increases capture no revenue</td>
+<td><strong>4/5</strong> (1 significant counter-example)</td>
+<td>Holds <strong>with a boundary condition</strong>: fails only for a genuinely price-insensitive population</td>
+</tr>
+</tbody>
+</table>
+<p>The mechanism is interpretable: <em>level</em> determines how much volume a price increase loses,
+while <em>spread</em> determines whether surplus can still be extracted from an insensitive tail. At
+the <strong>same mean elasticity of 2.0</strong>, a homogeneous population lost 2.14% while a highly
+heterogeneous one gained 0.77%. The baseline setting happens to sit near the sign-flip point.</p>
+<p>Settling this requires real price-elasticity data from CampusPark (conversion at different
+price points), not more simulation. I have corrected the claim everywhere it appeared.</p>
+<figure class="fig-wrap"><svg class="fig" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 390" width="100%" role="img" aria-label="Sensitivity sweep showing the revenue conclusion flipping sign"><style>.fig{--surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --ink3:#86857f; --grid:#e5e4e0; --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --pos:#2a78d6; --neg:#d03b3b; --mid:#f0efec;}@media (prefers-color-scheme: dark){:root:where(:not([data-theme='light'])) .fig{--surface:#1a1a19; --ink:#ffffff; --ink2:#c3c2b7; --ink3:#8f8e86; --grid:#33332f; --s1:#3987e5; --s2:#d95926; --s3:#199e70; --pos:#3987e5; --neg:#e66767; --mid:#383835;}}:root[data-theme='dark'] .fig{--surface:#1a1a19; --ink:#ffffff; --ink2:#c3c2b7; --ink3:#8f8e86; --grid:#33332f; --s1:#3987e5; --s2:#d95926; --s3:#199e70; --pos:#3987e5; --neg:#e66767; --mid:#383835;}.fig{font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif}.fig .ttl{fill:var(--ink);font-size:14px;font-weight:650}.fig .sub{fill:var(--ink2);font-size:11.5px}.fig .ax{fill:var(--ink2);font-size:11px}.fig .axs{fill:var(--ink3);font-size:10.5px}.fig .val{fill:var(--ink);font-size:10.5px;font-weight:600}.fig .vals{fill:var(--ink);font-size:9.5px;font-weight:600}.fig .grid{stroke:var(--grid);stroke-width:1}.fig .zero{stroke:var(--ink3);stroke-width:1.5}</style><rect width="760" height="390" fill="var(--surface)"/><text x="0" y="16" class="ttl">A finding I overturned: untargeted price increases</text><text x="0" y="34.0" class="sub">Revenue change from raising prices on RANDOM spots (P2) versus not raising them (P0), at ρ=2.0. Same surcharge count</text><text x="0" y="50.0" class="sub">as the rule arm, only relocated. Price sensitivity is a set, not measured, parameter — so it was swept. The sign flips</text><text x="0" y="66.0" class="sub">in 3 of 5 settings, so this was demoted from a conclusion to “observed under the baseline assumption”.</text><line x1="270.0" y1="104.0" x2="270.0" y2="334.0" class="grid"/><text x="270.0" y="96.0" class="axs" text-anchor="middle">-3%</text><line x1="310.0" y1="104.0" x2="310.0" y2="334.0" class="grid"/><text x="310.0" y="96.0" class="axs" text-anchor="middle">-2%</text><line x1="350.0" y1="104.0" x2="350.0" y2="334.0" class="grid"/><text x="350.0" y="96.0" class="axs" text-anchor="middle">-1%</text><line x1="390.0" y1="104.0" x2="390.0" y2="334.0" class="zero"/><text x="390.0" y="96.0" class="axs" text-anchor="middle">+0%</text><line x1="430.0" y1="104.0" x2="430.0" y2="334.0" class="grid"/><text x="430.0" y="96.0" class="axs" text-anchor="middle">+1%</text><line x1="470.0" y1="104.0" x2="470.0" y2="334.0" class="grid"/><text x="470.0" y="96.0" class="axs" text-anchor="middle">+2%</text><line x1="510.0" y1="104.0" x2="510.0" y2="334.0" class="grid"/><text x="510.0" y="96.0" class="axs" text-anchor="middle">+3%</text><line x1="550.0" y1="104.0" x2="550.0" y2="334.0" class="grid"/><text x="550.0" y="96.0" class="axs" text-anchor="middle">+4%</text><line x1="590.0" y1="104.0" x2="590.0" y2="334.0" class="grid"/><text x="590.0" y="96.0" class="axs" text-anchor="middle">+5%</text><line x1="630.0" y1="104.0" x2="630.0" y2="334.0" class="grid"/><text x="630.0" y="96.0" class="axs" text-anchor="middle">+6%</text><text x="0" y="121.0" class="ax">low level, homogeneous</text><text x="0" y="135.0" class="axs">elasticity 0.50±0.06 · charged +16.0%</text><path d="M390.0,114.0H502.5A4.0,4.0 0 0 1 506.5,118.0V128.0A4.0,4.0 0 0 1 502.5,132.0H390.0Z" fill="var(--pos)"><title>low level, homogeneous: revenue +2.91% vs static, p=0.000</title></path><text x="514.5" y="127.0" class="val" text-anchor="start">+2.91%</text><text x="0" y="167.0" class="ax">BASELINE</text><text x="0" y="181.0" class="axs">elasticity 1.00±0.12 · charged +13.8%</text><path d="M390.0,160.0H363.0A4.0,4.0 0 0 0 359.0,164.0V174.0A4.0,4.0 0 0 0 363.0,178.0H390.0Z" fill="var(--neg)"><title>BASELINE: revenue -0.78% vs static, p=0.008</title></path><text x="351.0" y="173.0" class="val" text-anchor="end">-0.78%</text><text x="0" y="213.0" class="ax">high level, homogeneous</text><text x="0" y="227.0" class="axs">elasticity 2.00±0.23 · charged +7.8%</text><path d="M390.0,206.0H308.2A4.0,4.0 0 0 0 304.2,210.0V220.0A4.0,4.0 0 0 0 308.2,224.0H390.0Z" fill="var(--neg)"><title>high level, homogeneous: revenue -2.14% vs static, p=0.000</title></path><text x="296.2" y="219.0" class="val" text-anchor="end">-2.14%</text><text x="0" y="259.0" class="ax">mid level, wide</text><text x="0" y="273.0" class="axs">elasticity 1.10±0.52 · charged +13.0%</text><path d="M390.0,252.0H391.8A4.0,4.0 0 0 1 395.8,256.0V266.0A4.0,4.0 0 0 1 391.8,270.0H390.0Z" fill="var(--pos)" opacity="0.45"><title>mid level, wide: revenue +0.14% vs static, p=0.574 (not significant)</title></path><text x="403.8" y="265.0" class="val" text-anchor="start">+0.14% n.s.</text><text x="0" y="305.0" class="ax">high level, very wide</text><text x="0" y="319.0" class="axs">elasticity 2.00±1.10 · charged +9.1%</text><path d="M390.0,298.0H390.0A3.0,3.0 0 0 1 393.0,301.0V313.0A3.0,3.0 0 0 1 390.0,316.0H390.0Z" fill="var(--pos)" opacity="0.45"><title>high level, very wide: revenue +0.07% vs static, p=0.759 (not significant)</title></path><text x="401.0" y="311.0" class="val" text-anchor="start">+0.07% n.s.</text><text x="0" y="356.0" class="axs">Faded bar = not significant at α=0.05. At the SAME mean elasticity of 2.0, a homogeneous population loses 2.46% where</text><text x="0" y="370.0" class="axs">a highly heterogeneous one gains 0.77% — spread decides whether surplus can still be taken from an insensitive tail.</text></svg></figure>
+<p><strong>Figure 2.</strong> The conclusion I revised myself. Across five elasticity settings the contrast is significantly contradicted once — the genuinely price-insensitive population, where blanket pricing really does pay. Note the last two rows: at the <strong>same mean elasticity (2.0)</strong> the homogeneous population loses 2.14% while the highly heterogeneous one captures nothing at all (+0.07%, n.s.). Spread decides whether any surplus is left to take; level decides how much volume a hike destroys.</p>
+<hr>
+<h2 id="5-experiment-a-design-frozen-awaiting-execution">5. Experiment A — design frozen, awaiting execution</h2>
+<p>The full pre-registration is in <code>PRE_REGISTRATION.md</code>, written before any LLM API call.</p>
+<p><strong>Arms.</strong> B0 Random (floor) · B1 FIFO (mirrors the production atomic-reservation transaction)
+· B2 Greedy (strong online baseline) · T1 LLM single-shot central allocator (<strong>ablation</strong> —
+isolates reasoning from negotiation) · T2 LLM 3-round multi-agent negotiation (treatment).</p>
+<p><strong>Configuration.</strong> Fleet scaled to 240 spaces; ρ ∈ {0.8, 1.2, 2.0} (192/288/480 requests);
+n=60 seeds main grid, n=20 for the effort ablation; broker = Claude Opus 5, per-user agents =
+Claude Haiku 4.5; strict JSON-schema tool calling throughout.</p>
+<p><strong>Pre-registered commitments.</strong>
+- Primary metrics fixed in advance: success rate, Jain's fairness index. Secondary family
+  corrected separately (Holm–Bonferroni).
+- <strong>Explicit falsification criteria for each hypothesis</strong>, including the rule that a
+  non-significant result is <em>not</em> evidence of equivalence — if the CI spans ±MDE the outcome
+  is recorded as "underpowered to decide," per load level.
+- Stopping rules: no interim peeking, no adding seeds after seeing results, no retrying
+  failed episodes, no repairing illegal allocations.
+- <strong>SHA-256 fingerprints of every prompt and tool schema are recorded</strong>, so post-hoc prompt
+  tuning would be detectable.</p>
+<p><strong>Measured power at the frozen configuration</strong> (classical arms already run, 540 episodes):</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>ρ=0.8</th>
+<th>ρ=1.2</th>
+<th>ρ=2.0</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>success_rate MDE</td>
+<td>0.95 pp</td>
+<td>0.80 pp</td>
+<td>0.63 pp</td>
+</tr>
+<tr>
+<td>jains_index MDE</td>
+<td>0.80 pp</td>
+<td>0.58 pp</td>
+<td>0.52 pp</td>
+</tr>
+</tbody>
+</table>
+<p>Pairing reduces variance ~74%. These come from deterministic policies and therefore capture
+scenario variance only; the LLM arms add model stochasticity, so power will be recomputed from
+pilot data before the main grid is trusted.</p>
+<hr>
+<h2 id="6-from-study-to-deployable-system">6. From study to deployable system</h2>
+<p>Stopping at "which policy scores better" would miss the practical question: <strong>hypothesis H3
+says the LLM produces allocations a classical scheduler structurally cannot</strong> — hallucinated
+spot IDs, double bookings, EV mismatches. A system that trusts model output will genuinely
+sell the same physical parking space twice. So the finding was turned into a deployable
+engineering layer.</p>
+<h3 id="61-a-contradiction-that-had-to-be-handled">6.1 A contradiction that had to be handled</h3>
+<p>Pre-registration §5 <strong>forbids</strong> retrying failed episodes and <strong>forbids</strong> repairing illegal
+allocations, because both would erase the failure mode this study measures. Production has
+the opposite obligation: it must retry, must fall back, must always return an answer.</p>
+<p>These cannot both hold in one codebase. So <code>serving/</code> <strong>wraps without modifying</strong>
+<code>harness/policies/</code>: the research path stays word-for-word as pre-registered, and the safety
+net sits outside it.</p>
+<h3 id="62-layering">6.2 Layering</h3>
+<pre><code>request
+  -&gt; cost ceiling guard     refuse to call the model past a budget
+  -&gt; circuit breaker        skip the model entirely once it is failing
+  -&gt; deadline + bounded retry
+  -&gt; LLM policy             harness/, untouched
+  -&gt; validator gate         the SAME validator the experiment scores with;
+                            illegal allocations are dropped, never repaired
+  -&gt; Greedy fallback        re-decide everything the model lost
+  -&gt; telemetry              p50/p95 latency, cost, illegal rate, degradation rate
+</code></pre>
+<p>The service is standard library only (no framework), matching CampusPark's own <code>server.js</code>.
+Measured behavior with <strong>no API key present</strong>: <code>/healthz</code> returns 503 and states
+<code>status=degraded, breaker=open</code>; <code>/allocate</code> still returns a usable answer via Greedy, marked
+<code>degraded=true</code>. <strong>It degrades rather than crashing, and reports its own degradation
+honestly.</strong></p>
+<h3 id="63-tests-and-ci">6.3 Tests and CI</h3>
+<p>All 75 tests run against a stub client, and <code>conftest.py</code> <strong>hard-blocks outbound sockets</strong> —
+a test that started calling the real API would bill every push, so that is made mechanically
+impossible rather than merely discouraged.</p>
+<p>CI, with no API key, checks five things: tests pass, <strong>two independent runs are byte-identical</strong>,
+classical policies produce zero illegal allocations, <strong>prompt fingerprints still match the
+pre-registration</strong> (making post-hoc prompt tuning detectable), and the service degrades
+gracefully without a key.</p>
+<h3 id="64-the-engineering-layer-caught-two-bugs-of-its-own">6.4 The engineering layer caught two bugs of its own</h3>
+<p><strong>(a) The timeout was decorative.</strong> <code>with ThreadPoolExecutor(...)</code> calls <code>shutdown(wait=True)</code>
+on exit, blocking until the hung worker returns — the deadline fired correctly but the caller
+still waited the full 5 seconds. A test asserting "the caller must not wait for a hung model"
+caught it (asserted &lt;3s, measured 5.02s). That class of defect is an incident in production.</p>
+<p><strong>(b) My own CI reproducibility check was wrong.</strong> Diffing two result CSVs directly always
+fails, because <code>decision_latency_s</code> is wall-clock. Running the CI steps locally first surfaced
+it; otherwise every push would have gone red.</p>
+<h3 id="65-low-cost-pilot">6.5 Low-cost pilot</h3>
+<p>Before committing to the ~$748 full grid, ~<strong>$6</strong> across four steps, each with an explicit
+stop condition: does the API path work at all ($0.02), how accurate is the cost estimate and
+what is the illegal-allocation rate ($1), <strong>does the negotiation revision round actually
+fire</strong> ($1.8), and does model variance invalidate the n=60 power claim ($3). The last matters
+most: if model jitter is comparable to the classical arms' paired-difference SD, the frozen
+MDE is optimistic — and the response is <strong>not</strong> to quietly add seeds (pre-registration forbids
+it) but to revise the sample size, record the reason, and re-freeze.</p>
+<hr>
+<h2 id="7-methodological-points-i-would-highlight">7. Methodological points I would highlight</h2>
+<p><strong>Reproducibility without <code>temperature</code>.</strong> Current Claude models reject the <code>temperature</code>
+parameter outright (HTTP 400), so the standard "set temperature=0 for determinism" protocol is
+unavailable. Rather than ignore the problem, the design isolates and <em>measures</em> stochasticity:
+scenario generation is fully seeded, each cell is replicated three times, and variance is
+decomposed via a linear mixed-effects model reporting the intraclass correlation — i.e. how
+much of total variance is the model's own jitter.</p>
+<p><strong>Scale validation, and a limit on what it proves.</strong> The LLM arms cannot be afforded at full
+size, so supply and demand are shrunk together (preserving ρ's meaning). Before relying on
+this, classical baselines were run at both scales: strategy ordering held in 6/6 (metric, ρ)
+cells, max mean deviation 0.121. <strong>However</strong>, I initially over-claimed from this: it validates
+effect <em>magnitude and ordering</em>, not statistical <em>precision</em>. Measured MDE is 2.57 pp at the
+small scale versus 0.79 pp at full scale — which is why the frozen configuration uses a larger
+fleet than originally planned.</p>
+<figure class="fig-wrap"><svg class="fig" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 416" width="100%" role="img" aria-label="Scale validation dumbbell chart comparing success rate at two fleet sizes"><style>.fig{--surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --ink3:#86857f; --grid:#e5e4e0; --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --pos:#2a78d6; --neg:#d03b3b; --mid:#f0efec;}@media (prefers-color-scheme: dark){:root:where(:not([data-theme='light'])) .fig{--surface:#1a1a19; --ink:#ffffff; --ink2:#c3c2b7; --ink3:#8f8e86; --grid:#33332f; --s1:#3987e5; --s2:#d95926; --s3:#199e70; --pos:#3987e5; --neg:#e66767; --mid:#383835;}}:root[data-theme='dark'] .fig{--surface:#1a1a19; --ink:#ffffff; --ink2:#c3c2b7; --ink3:#8f8e86; --grid:#33332f; --s1:#3987e5; --s2:#d95926; --s3:#199e70; --pos:#3987e5; --neg:#e66767; --mid:#383835;}.fig{font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif}.fig .ttl{fill:var(--ink);font-size:14px;font-weight:650}.fig .sub{fill:var(--ink2);font-size:11.5px}.fig .ax{fill:var(--ink2);font-size:11px}.fig .axs{fill:var(--ink3);font-size:10.5px}.fig .val{fill:var(--ink);font-size:10.5px;font-weight:600}.fig .vals{fill:var(--ink);font-size:9.5px;font-weight:600}.fig .grid{stroke:var(--grid);stroke-width:1}.fig .zero{stroke:var(--ink3);stroke-width:1.5}</style><rect width="760" height="416" fill="var(--surface)"/><text x="0" y="16" class="ttl">Scale validation: the shrink preserves the ordering</text><text x="0" y="34.0" class="sub">Success rate per arm and load at both fleet sizes. The LLM arms cannot be afforded at full size, so supply and demand</text><text x="0" y="50.0" class="sub">shrink together — verified here before relying on it. Ordering held in 6/6 (metric, ρ) cells; max mean deviation</text><text x="0" y="66.0" class="sub">0.052. It validates magnitude and ordering, NOT statistical precision (see Fig 4).</text><line x1="249.2" y1="102" x2="249.2" y2="372.0" class="grid"/><text x="249.2" y="94" class="axs" text-anchor="middle">0.2</text><line x1="327.7" y1="102" x2="327.7" y2="372.0" class="grid"/><text x="327.7" y="94" class="axs" text-anchor="middle">0.3</text><line x1="406.2" y1="102" x2="406.2" y2="372.0" class="grid"/><text x="406.2" y="94" class="axs" text-anchor="middle">0.4</text><line x1="484.6" y1="102" x2="484.6" y2="372.0" class="grid"/><text x="484.6" y="94" class="axs" text-anchor="middle">0.5</text><line x1="563.1" y1="102" x2="563.1" y2="372.0" class="grid"/><text x="563.1" y="94" class="axs" text-anchor="middle">0.6</text><line x1="641.5" y1="102" x2="641.5" y2="372.0" class="grid"/><text x="641.5" y="94" class="axs" text-anchor="middle">0.7</text><line x1="720.0" y1="102" x2="720.0" y2="372.0" class="grid"/><text x="720.0" y="94" class="axs" text-anchor="middle">0.8</text><text x="0" y="121.0" class="ax">greedy · ρ=0.8</text><line x1="593.6" y1="117.0" x2="621.1" y2="117.0" stroke="var(--ink3)" stroke-width="2"/><circle cx="621.1" cy="117.0" r="5.5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"><title>greedy ρ=0.8: 0.674</title></circle><circle cx="593.6" cy="117.0" r="5.5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"><title>greedy ρ=0.8: 0.639</title></circle><text x="633.1" y="121.0" class="val">Δ0.035</text><text x="0" y="151.0" class="ax">greedy · ρ=1.2</text><line x1="543.5" y1="147.0" x2="591.0" y2="147.0" stroke="var(--ink3)" stroke-width="2"/><circle cx="591.0" cy="147.0" r="5.5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"><title>greedy ρ=1.2: 0.636</title></circle><circle cx="543.5" cy="147.0" r="5.5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"><title>greedy ρ=1.2: 0.575</title></circle><text x="603.0" y="151.0" class="val">Δ0.061</text><text x="0" y="181.0" class="ax">greedy · ρ=2.0</text><line x1="513.8" y1="177.0" x2="536.8" y2="177.0" stroke="var(--ink3)" stroke-width="2"/><circle cx="536.8" cy="177.0" r="5.5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"><title>greedy ρ=2.0: 0.567</title></circle><circle cx="513.8" cy="177.0" r="5.5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"><title>greedy ρ=2.0: 0.537</title></circle><text x="548.8" y="181.0" class="val">Δ0.029</text><text x="0" y="211.0" class="ax">fifo · ρ=0.8</text><line x1="454.1" y1="207.0" x2="546.5" y2="207.0" stroke="var(--ink3)" stroke-width="2"/><circle cx="546.5" cy="207.0" r="5.5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"><title>fifo ρ=0.8: 0.579</title></circle><circle cx="454.1" cy="207.0" r="5.5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"><title>fifo ρ=0.8: 0.461</title></circle><text x="558.5" y="211.0" class="val">Δ0.118</text><text x="0" y="241.0" class="ax">fifo · ρ=1.2</text><line x1="391.6" y1="237.0" x2="486.4" y2="237.0" stroke="var(--ink3)" stroke-width="2"/><circle cx="486.4" cy="237.0" r="5.5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"><title>fifo ρ=1.2: 0.502</title></circle><circle cx="391.6" cy="237.0" r="5.5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"><title>fifo ρ=1.2: 0.381</title></circle><text x="498.4" y="241.0" class="val">Δ0.121</text><text x="0" y="271.0" class="ax">fifo · ρ=2.0</text><line x1="332.5" y1="267.0" x2="380.0" y2="267.0" stroke="var(--ink3)" stroke-width="2"/><circle cx="380.0" cy="267.0" r="5.5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"><title>fifo ρ=2.0: 0.367</title></circle><circle cx="332.5" cy="267.0" r="5.5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"><title>fifo ρ=2.0: 0.306</title></circle><text x="392.0" y="271.0" class="val">Δ0.061</text><text x="0" y="301.0" class="ax">random · ρ=0.8</text><line x1="279.4" y1="297.0" x2="281.9" y2="297.0" stroke="var(--ink3)" stroke-width="2"/><circle cx="279.4" cy="297.0" r="5.5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"><title>random ρ=0.8: 0.238</title></circle><circle cx="281.9" cy="297.0" r="5.5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"><title>random ρ=0.8: 0.242</title></circle><text x="293.9" y="301.0" class="val">Δ0.003</text><text x="0" y="331.0" class="ax">random · ρ=1.2</text><line x1="270.3" y1="327.0" x2="276.5" y2="327.0" stroke="var(--ink3)" stroke-width="2"/><circle cx="276.5" cy="327.0" r="5.5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"><title>random ρ=1.2: 0.235</title></circle><circle cx="270.3" cy="327.0" r="5.5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"><title>random ρ=1.2: 0.227</title></circle><text x="288.5" y="331.0" class="val">Δ0.008</text><text x="0" y="361.0" class="ax">random · ρ=2.0</text><line x1="266.2" y1="357.0" x2="277.0" y2="357.0" stroke="var(--ink3)" stroke-width="2"/><circle cx="277.0" cy="357.0" r="5.5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"><title>random ρ=2.0: 0.235</title></circle><circle cx="266.2" cy="357.0" r="5.5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"><title>random ρ=2.0: 0.222</title></circle><text x="289.0" y="361.0" class="val">Δ0.014</text><rect x="0.0" y="393.0" width="10" height="10" rx="2.5" fill="var(--s1)"/><text x="15.0" y="402.0" class="ax">full fleet (833 spaces)</text><rect x="200.3" y="393.0" width="10" height="10" rx="2.5" fill="var(--s2)"/><text x="215.3" y="402.0" class="ax">compact (30 spaces)</text></svg></figure>
+<p><strong>Figure 3.</strong> The shrink preserves the strategy ordering (6/6 cells), max mean deviation 0.121.</p>
+<figure class="fig-wrap"><svg class="fig" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 316" width="100%" role="img" aria-label="Minimum detectable effect by fleet size"><style>.fig{--surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --ink3:#86857f; --grid:#e5e4e0; --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --pos:#2a78d6; --neg:#d03b3b; --mid:#f0efec;}@media (prefers-color-scheme: dark){:root:where(:not([data-theme='light'])) .fig{--surface:#1a1a19; --ink:#ffffff; --ink2:#c3c2b7; --ink3:#8f8e86; --grid:#33332f; --s1:#3987e5; --s2:#d95926; --s3:#199e70; --pos:#3987e5; --neg:#e66767; --mid:#383835;}}:root[data-theme='dark'] .fig{--surface:#1a1a19; --ink:#ffffff; --ink2:#c3c2b7; --ink3:#8f8e86; --grid:#33332f; --s1:#3987e5; --s2:#d95926; --s3:#199e70; --pos:#3987e5; --neg:#e66767; --mid:#383835;}.fig{font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif}.fig .ttl{fill:var(--ink);font-size:14px;font-weight:650}.fig .sub{fill:var(--ink2);font-size:11.5px}.fig .ax{fill:var(--ink2);font-size:11px}.fig .axs{fill:var(--ink3);font-size:10.5px}.fig .val{fill:var(--ink);font-size:10.5px;font-weight:600}.fig .vals{fill:var(--ink);font-size:9.5px;font-weight:600}.fig .grid{stroke:var(--grid);stroke-width:1}.fig .zero{stroke:var(--ink3);stroke-width:1.5}</style><rect width="760" height="316" fill="var(--surface)"/><text x="0" y="16" class="ttl">What the shrink costs: detectable effect size</text><text x="0" y="34.0" class="sub">Minimum detectable difference in success rate (fifo vs greedy, ρ=1.2, n=30, α=0.05, power=0.80), measured from the</text><text x="0" y="50.0" class="sub">paired-difference SD. A correction to an earlier claim of mine: the scale validation in Fig 3 covers effect ordering,</text><text x="0" y="66.0" class="sub">not precision. At 30 spaces a real 2pp difference would be called “not significant” — a null result, not a negative</text><text x="0" y="82.0" class="sub">one.</text><line x1="0" y1="238.0" x2="700" y2="238.0" class="grid"/><text x="706" y="241.5" class="axs">0.0 pp</text><line x1="0" y1="198.7" x2="700" y2="198.7" class="grid"/><text x="706" y="202.2" class="axs">1.0 pp</text><line x1="0" y1="159.3" x2="700" y2="159.3" class="grid"/><text x="706" y="162.8" class="axs">2.0 pp</text><line x1="0" y1="120.0" x2="700" y2="120.0" class="grid"/><text x="706" y="123.5" class="axs">3.0 pp</text><path d="M18.0,238.0V124.0A4.0,4.0 0 0 1 22.0,120.0H211.3A4.0,4.0 0 0 1 215.3,124.0V238.0Z" fill="#86b6ef"><title>30 spaces: MDE 3.00 pp</title></path><text x="116.7" y="114.0" class="val" text-anchor="middle">3.00 pp</text><text x="116.7" y="254" class="ax" text-anchor="middle">30 spaces</text><path d="M251.3,238.0V196.5A4.0,4.0 0 0 1 255.3,192.5H444.7A4.0,4.0 0 0 1 448.7,196.5V238.0Z" fill="#5598e7"><title>240 spaces: MDE 1.16 pp</title></path><text x="350.0" y="186.5" class="val" text-anchor="middle">1.16 pp</text><text x="350.0" y="254" class="ax" text-anchor="middle">240 spaces</text><path d="M484.7,238.0V215.2A4.0,4.0 0 0 1 488.7,211.2H678.0A4.0,4.0 0 0 1 682.0,215.2V238.0Z" fill="#2a78d6"><title>833 spaces: MDE 0.68 pp</title></path><text x="583.3" y="205.2" class="val" text-anchor="middle">0.68 pp</text><text x="583.3" y="254" class="ax" text-anchor="middle">833 spaces</text><line x1="0" y1="238" x2="700" y2="238" class="zero"/><text x="0" y="276.0" class="axs">The frozen configuration uses 240 spaces at n=60, giving 0.65–1.07 pp. These come from deterministic policies, so they</text><text x="0" y="290.0" class="axs">are optimistic for the LLM arms, whose own jitter adds on top.</text></svg></figure>
+<p><strong>Figure 4.</strong> But it does not preserve precision. This corrects an earlier claim of mine:
+Figure 3 validates magnitude and ordering, not statistical power.</p>
+<p><strong>Failure modes are measured, not repaired.</strong> An independent validator re-checks every
+allocation against the hard constraints. Illegal LLM output is recorded and rejected, never
+patched — patching it would erase the exact quantity hypothesis H3 is about.</p>
+<p><strong>Two bugs caught before they could contaminate results.</strong> (a) The LLM commit path did not
+enforce the same acceptance threshold the classical policies apply, which would have let a
+negative-utility match count as a "success" for LLM arms only, making success rates
+incomparable across conditions. (b) A tool-name mismatch silently disabled T2's negotiation
+revision round entirely. Both were found via a zero-cost dry-run harness using a stub API
+client, before any money was spent.</p>
+<p><strong>Cost reasoning corrected by measurement.</strong> Offline profiling showed spend is dominated by
+broker reasoning tokens (an 11.7× swing, \$26–\$303 for the same grid), while the per-agent
+model choice my proposal had emphasized accounts for only 1.4–2.4%. Reasoning effort is
+therefore treated as an experimental factor (does more reasoning buy better allocations?) and
+not merely a cost dial.</p>
+<hr>
+<h2 id="8-questions-i-would-like-your-guidance-on">8. Questions I would like your guidance on</h2>
+<ol>
+<li><strong>Data sufficiency.</strong> Is "discrete-event simulation calibrated on real price data" an
+   acceptable data source for this course, or is real user interaction data required? The
+   honest limitation is 24 garages over ~24.5 hours, with capacity/geography/EV synthesized.</li>
+<li><strong>Reporting the overturned finding (§4.3).</strong> My inclination is to report it prominently as
+   a sensitivity result rather than delete it, since the mechanism is interesting and the
+   episode demonstrates the value of the control. Would you prefer it in the main results or
+   an appendix?</li>
+<li><strong>Sample size.</strong> Is n=60 per cell (MDE ≈ 0.5–0.95 pp on the classical arms) acceptable,
+   given that the LLM arms will be somewhat noisier?</li>
+<li><strong>Scope of Experiment A.</strong> Should the effort ablation (does deeper reasoning improve
+   allocation quality?) stay in scope, or is the T1-vs-T2 negotiation ablation enough?</li>
+<li><strong>Human-subjects extension.</strong> A small study on whether users <em>perceive</em> LLM-negotiated
+   allocations as fairer than Jain's index suggests would strengthen the contribution, but
+   would require IRB. Is that feasible within the term?</li>
+</ol>
+<hr>
+<h2 id="9-artifacts">9. Artifacts</h2>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>research_proposal_llm_allocation.md</code></td>
+<td>Full proposal, updated as findings corrected it</td>
+</tr>
+<tr>
+<td><code>llm-allocation-study/PRE_REGISTRATION.md</code></td>
+<td>Frozen Experiment A design, falsification criteria, prompt fingerprints</td>
+</tr>
+<tr>
+<td><code>llm-allocation-study/PILOT_PLAN.md</code></td>
+<td>Four-step, ~$6 pilot with explicit stop conditions</td>
+</tr>
+<tr>
+<td><code>llm-allocation-study/harness/</code></td>
+<td>Simulator, 5 allocation policies, validator, metrics, analysis tooling</td>
+</tr>
+<tr>
+<td><code>llm-allocation-study/serving/</code></td>
+<td>Production layer: breaker, validator gate, fallback, telemetry, HTTP service</td>
+</tr>
+<tr>
+<td><code>llm-allocation-study/tests/</code></td>
+<td>75 tests, all stub-client, outbound network blocked</td>
+</tr>
+<tr>
+<td><code>.github/workflows/ci.yml</code></td>
+<td>CI: tests, reproducibility, zero illegal allocations, prompt fingerprints, degradation</td>
+</tr>
+<tr>
+<td><code>llm-allocation-study/results/pricing_findings.md</code></td>
+<td>Experiment B results and limitations</td>
+</tr>
+<tr>
+<td><code>llm-allocation-study/results/pricing_sensitivity.md</code></td>
+<td>The five-setting sweep and the overturned finding</td>
+</tr>
+<tr>
+<td><code>llm-allocation-study/results/scale_validation.md</code></td>
+<td>Small-fleet vs full-fleet comparison</td>
+</tr>
+<tr>
+<td><code>llm-allocation-study/results/design_recommendation.md</code></td>
+<td>Power/cost analysis behind the frozen configuration</td>
+</tr>
+<tr>
+<td><code>llm-allocation-study/results/cost_analysis.md</code></td>
+<td>Inference cost structure</td>
+</tr>
+<tr>
+<td><code>llm-allocation-study/data_provenance.md</code></td>
+<td>Field-by-field real vs synthetic accounting</td>
+</tr>
+</tbody>
+</table>
+<p>All experiments are reproducible from seeds; every result in this report can be regenerated
+with the commands in each document.</p>
+<blockquote>
+<p>A Chinese translation of this report is kept at <code>PROGRESS_REPORT_zh.md</code>.</p>
+</blockquote>
+<div class="meta">由 PROGRESS_REPORT.md 生成于 2026-10-05 11:46　·　单文件、离线可读　·　浏览器中按 Cmd-P 可导出 PDF</div>
+</body>
+</html>

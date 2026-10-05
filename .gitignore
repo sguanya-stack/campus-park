@@ -3,3 +3,12 @@ node_modules/
 .DS_Store
 *.dmg
 .idea/
+
+# Research harness (deliverables/llm-allocation-study)
+__pycache__/
+*.pyc
+.pytest_cache/
+# Per-episode audit logs: 2,649 files / 10MB, all regenerable from the seeds
+# in results/*.csv (reproducibility is verified in CI), so they are not worth
+# the repo weight.
+deliverables/llm-allocation-study/runs/
