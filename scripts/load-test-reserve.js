@@ -16,6 +16,7 @@
 
 "use strict";
 const http = require("http");
+const crypto = require("crypto");
 const { PrismaClient } = require("@prisma/client");
 
 const BASE = "http://localhost:3000";
@@ -69,16 +70,21 @@ async function main() {
   console.log(`Target spot : ${spot.name} (id=${spot.id})`);
   console.log(`Set         : availableSpots = 1\n`);
 
-  // 3. Get or create 10 test users and log them all in
+  // 3. Get or create 10 test users and log them all in.
+  // NOTE: users are seeded via direct DB upsert instead of POST /api/auth/register,
+  // because the register endpoint is rate-limited (5/min per IP) and 10 rapid
+  // registrations would trip it. Hashing (scrypt, 64 bytes) matches server.js.
   const CONCURRENCY = 10;
   const tokens = [];
   for (let i = 0; i < CONCURRENCY; i++) {
     const name = `loadtest_user_${i}`;
-    // Ensure user exists (ignore conflict)
-    const reg = await post("/api/auth/register", { name, password: "TestPass123!" });
-    if (reg.status !== 201 && reg.status !== 409) {
-      console.warn(`  Register user ${name}: HTTP ${reg.status}`);
-    }
+    const passwordSalt = crypto.randomBytes(16).toString("hex");
+    const passwordHash = crypto.scryptSync("TestPass123!", passwordSalt, 64).toString("hex");
+    await prisma.appUser.upsert({
+      where: { name },
+      update: { passwordSalt, passwordHash, role: "student" },
+      create: { name, role: "student", passwordSalt, passwordHash }
+    });
     const login = await post("/api/auth/login", { name, password: "TestPass123!" });
     if (!login.body?.token) {
       console.error(`  Login failed for ${name}:`, login.body);
