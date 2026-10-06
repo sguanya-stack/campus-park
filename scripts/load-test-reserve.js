@@ -70,29 +70,31 @@ async function main() {
   console.log(`Target spot : ${spot.name} (id=${spot.id})`);
   console.log(`Set         : availableSpots = 1\n`);
 
-  // 3. Get or create 10 test users and log them all in.
-  // NOTE: users are seeded via direct DB upsert instead of POST /api/auth/register,
-  // because the register endpoint is rate-limited (5/min per IP) and 10 rapid
-  // registrations would trip it. Hashing (scrypt, 64 bytes) matches server.js.
+  // 3. Get or create 10 test users and mint their session tokens.
+  // NOTE: users AND sessions are seeded via direct DB access instead of
+  // POST /api/auth/register + /api/auth/login, because both endpoints are
+  // rate-limited (5/min and 10/min per IP) and 10 rapid test users would
+  // trip them. Hashing (scrypt, 64 bytes) and session shape match server.js.
+  // This test guards booking race conditions, not the auth endpoints.
   const CONCURRENCY = 10;
   const tokens = [];
   for (let i = 0; i < CONCURRENCY; i++) {
     const name = `loadtest_user_${i}`;
     const passwordSalt = crypto.randomBytes(16).toString("hex");
     const passwordHash = crypto.scryptSync("TestPass123!", passwordSalt, 64).toString("hex");
-    await prisma.appUser.upsert({
+    const user = await prisma.appUser.upsert({
       where: { name },
       update: { passwordSalt, passwordHash, role: "student" },
       create: { name, role: "student", passwordSalt, passwordHash }
     });
-    const login = await post("/api/auth/login", { name, password: "TestPass123!" });
-    if (!login.body?.token) {
-      console.error(`  Login failed for ${name}:`, login.body);
-      process.exit(1);
-    }
-    tokens.push(login.body.token);
+    const token = crypto.randomUUID();
+    await prisma.$transaction([
+      prisma.appSession.deleteMany({ where: { userId: user.id } }),
+      prisma.appSession.create({ data: { token, userId: user.id } })
+    ]);
+    tokens.push(token);
   }
-  console.log(`Logged in ${CONCURRENCY} test users.\n`);
+  console.log(`Seeded ${CONCURRENCY} test users with sessions.\n`);
 
   // 4. Fire all reservations simultaneously
   const startTime = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hr from now
